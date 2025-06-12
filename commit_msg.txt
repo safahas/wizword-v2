@@ -1,0 +1,1 @@
+[Cursor]  Port UI and stats improvements to main streamlit_app.py\n\n- Icon-based compact stats row at top of right column\n- Consistent mobile-friendly layout\n- All recent WizWord UI/UX improvements\n
