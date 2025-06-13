@@ -24,6 +24,20 @@ st.set_page_config(
     }
 )
 
+# Inject click sound JS (static directory)
+st.markdown("""
+<audio id=\"click-sound\" src=\"static/clicksound.mp3\"></audio>
+<script>
+document.addEventListener('click', function(e) {
+    var audio = document.getElementById('click-sound');
+    if(audio) {
+        audio.currentTime = 0;
+        audio.play();
+    }
+}, true);
+</script>
+""", unsafe_allow_html=True)
+
 # Initialize ShareUtils
 share_utils = ShareUtils()
 
@@ -675,31 +689,71 @@ def display_game():
     game = st.session_state.game
     max_hints = game.current_settings["max_hints"]
 
-    # Show WizWord icon/title at the top (smaller for status bar)
-    st.markdown("""
-        <div class='wizword-status-title'>WizWord</div>
-        <style>
-        .wizword-status-title {
-            font-family: 'Baloo 2', 'Poppins', 'Arial Black', Arial, sans-serif !important;
-            font-size: 1.3em;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            background: linear-gradient(90deg, #FF6B6B 0%, #FFD93D 50%, #4ECDC4 100%);
-            color: #fff;
-            text-align: center;
-            padding: 8px 18px;
-            margin: 8px auto 8px auto;
-            border-radius: 16px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10),
-                        inset 0 -2px 0px rgba(0, 0, 0, 0.07);
-            -webkit-text-stroke: 1px #222;
-            text-stroke: 1px #222;
-            text-shadow: 1px 1px 4px rgba(0,0,0,0.13),
-                         0 1px 4px rgba(0,0,0,0.08);
-            transition: box-shadow 0.2s, background 0.2s;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    # --- FLEX BANNER WITH TITLE LEFT, STATS RIGHT ---
+    stats_html = """
+    <div class='wizword-banner'>
+      <div class='wizword-banner-title'>WizWord</div>
+      <div class='wizword-banner-stats'>
+    """
+    stats_html += f"<span class='wizword-stat'><b>🎮</b> {game.mode}</span>"
+    if game.mode == "Challenge":
+        stats_html += f"<span class='wizword-stat'><b>🏆</b> {game.score}</span>"
+        stats_html += f"<span class='wizword-stat'><b>🎯</b> {game.guesses_made}</span>"
+        stats_html += f"<span class='wizword-stat'><b>💡</b> {max_hints - len(game.hints_given)}/{max_hints}</span>"
+    else:
+        stats_html += f"<span class='wizword-stat'><b>🎯</b> {game.guesses_made}</span>"
+        stats_html += f"<span class='wizword-stat'><b>💡</b> {max_hints - len(game.hints_given)}/{max_hints}</span>"
+    stats_html += "</div></div>"
+    stats_html += """
+    <style>
+    .wizword-banner {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        background: linear-gradient(90deg, #FF6B6B 0%, #FFD93D 50%, #4ECDC4 100%);
+        color: #fff;
+        padding: 10px 24px 10px 24px;
+        margin: 10px 0 18px 0;
+        border-radius: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10),
+                    inset 0 -2px 0px rgba(0, 0, 0, 0.07);
+        -webkit-text-stroke: 1px #222;
+        text-stroke: 1px #222;
+        text-shadow: 1px 1px 4px rgba(0,0,0,0.13),
+                     0 1px 4px rgba(0,0,0,0.08);
+        transition: box-shadow 0.2s, background 0.2s;
+    }
+    .wizword-banner-title {
+        font-family: 'Baloo 2', 'Poppins', 'Arial Black', Arial, sans-serif !important;
+        font-size: 1.5em;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin-right: 24px;
+        flex: 0 0 auto;
+    }
+    .wizword-banner-stats {
+        display: flex;
+        flex-direction: row;
+        gap: 18px;
+        font-size: 1.1em;
+        font-weight: 600;
+        align-items: center;
+    }
+    .wizword-stat {
+        background: rgba(0,0,0,0.13);
+        border-radius: 8px;
+        padding: 4px 12px;
+        margin-left: 0;
+        margin-right: 0;
+        min-width: 60px;
+        text-align: center;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+    }
+    </style>
+    """
+    st.markdown(stats_html, unsafe_allow_html=True)
+    # --- END FLEX BANNER ---
 
     # Create main two-column layout
     left_col, right_col = st.columns([1, 3])  # 1:3 ratio to make right side wider
@@ -707,11 +761,12 @@ def display_game():
     # Left column - Game Controls
     with left_col:
         st.markdown("### 🎯 Make a Guess")
+        actual_length = len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else game.word_length
         with st.form(key="guess_form"):
             guess = st.text_input(
                 "Enter your guess:",
-                placeholder=f"Enter a {game.word_length}-letter word",
-                help=f"Must be exactly {game.word_length} letters",
+                placeholder=f"Enter a {actual_length}-letter word",
+                help=f"Must be exactly {actual_length} letters",
                 key="guess_input"
             )
             submit_guess = st.form_submit_button("Submit Guess")
@@ -731,23 +786,6 @@ def display_game():
 
     # Right column - Game Operations
     with right_col:
-        # --- STATS ROW AT THE VERY TOP OF RIGHT COLUMN ---
-        stats_cols = st.columns(4, gap="small")
-        with stats_cols[0]:
-            st.metric("🎮", game.mode)
-        if game.mode == "Challenge":
-            with stats_cols[1]:
-                st.metric("🏆", game.score)
-            with stats_cols[2]:
-                st.metric("🎯", game.guesses_made)
-            with stats_cols[3]:
-                st.metric("💡", f"{max_hints - len(game.hints_given)}/{max_hints}")
-        else:
-            with stats_cols[1]:
-                st.metric("🎯", game.guesses_made)
-            with stats_cols[2]:
-                st.metric("💡", f"{max_hints - len(game.hints_given)}/{max_hints}")
-        # --- END STATS ROW ---
         # Hint section with combined button
         with st.container():
             hints_remaining = max_hints - len(game.hints_given)
@@ -833,6 +871,76 @@ def display_game():
 
 def display_game_over(game_summary):
     """Display game over screen with statistics and sharing options."""
+    # Add WizWord banner at the top
+    stats_html = """
+    <div class='wizword-banner'>
+      <div class='wizword-banner-title'>WizWord</div>
+      <div class='wizword-banner-stats'>
+    """
+    mode = game_summary.get('mode', 'Fun')
+    score = game_summary.get('score', 0)
+    guesses = game_summary.get('guesses_made', len(game_summary.get('questions_asked', [])))
+    hints = game_summary.get('max_hints', 7)
+    hints_used = len(game_summary.get('hints_given', []))
+    stats_html += f"<span class='wizword-stat'><b>🎮</b> {mode}</span>"
+    if mode == "Challenge":
+        stats_html += f"<span class='wizword-stat'><b>🏆</b> {score}</span>"
+        stats_html += f"<span class='wizword-stat'><b>🎯</b> {guesses}</span>"
+        stats_html += f"<span class='wizword-stat'><b>💡</b> {hints-hints_used}/{hints}</span>"
+    else:
+        stats_html += f"<span class='wizword-stat'><b>🎯</b> {guesses}</span>"
+        stats_html += f"<span class='wizword-stat'><b>💡</b> {hints-hints_used}/{hints}</span>"
+    stats_html += "</div></div>"
+    stats_html += """
+    <style>
+    .wizword-banner {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        background: linear-gradient(90deg, #FF6B6B 0%, #FFD93D 50%, #4ECDC4 100%);
+        color: #fff;
+        padding: 10px 24px 10px 24px;
+        margin: 10px 0 18px 0;
+        border-radius: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10),
+                    inset 0 -2px 0px rgba(0, 0, 0, 0.07);
+        -webkit-text-stroke: 1px #222;
+        text-stroke: 1px #222;
+        text-shadow: 1px 1px 4px rgba(0,0,0,0.13),
+                     0 1px 4px rgba(0,0,0,0.08);
+        transition: box-shadow 0.2s, background 0.2s;
+    }
+    .wizword-banner-title {
+        font-family: 'Baloo 2', 'Poppins', 'Arial Black', Arial, sans-serif !important;
+        font-size: 1.5em;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin-right: 24px;
+        flex: 0 0 auto;
+    }
+    .wizword-banner-stats {
+        display: flex;
+        flex-direction: row;
+        gap: 18px;
+        font-size: 1.1em;
+        font-weight: 600;
+        align-items: center;
+    }
+    .wizword-stat {
+        background: rgba(0,0,0,0.13);
+        border-radius: 8px;
+        padding: 4px 12px;
+        margin-left: 0;
+        margin-right: 0;
+        min-width: 60px;
+        text-align: center;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+    }
+    </style>
+    """
+    st.markdown(stats_html, unsafe_allow_html=True)
+    # --- END FLEX BANNER ---
     st.markdown("## 🎉 Game Over!")
     
     # Create tabs for different sections
