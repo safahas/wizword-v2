@@ -11,6 +11,7 @@ import seaborn as sns
 import numpy as np
 from typing import Dict, Optional, Tuple, List
 from .share_utils import ShareUtils
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,7 +95,7 @@ class ShareCardGenerator:
         if mode == "Fun":
             return self.colors['score']['good']
         
-        # For Challenge mode, lower is better
+        # For Wiz mode, lower is better
         if score <= 10:
             return self.colors['score']['good']
         elif score <= 30:
@@ -337,7 +338,7 @@ class ShareCardGenerator:
             category: Word category
             score: Final score
             duration: Game duration in seconds
-            mode: Game mode (Challenge/Fun)
+            mode: Game mode (Wiz/Fun)
             nickname: Optional player nickname
             player_stats: Optional player statistics
             difficulty: Optional difficulty
@@ -408,9 +409,16 @@ class ShareCardGenerator:
                 fill=self.colors['text'],
                 anchor="mm"
             )
+            draw.text(
+                (self.width//2, word_y + 100),
+                f"Mode: {mode}",
+                font=fonts['text'],
+                fill=self.colors['text'],
+                anchor="mm"
+            )
             
-            # Draw score, time, and difficulty with icons
-            score_y = word_y + 120
+            # Draw score (move further down for better spacing)
+            score_y = word_y + 180
             score_color = self._get_score_color(score, mode)
             # Use provided difficulty, or fallback to player_stats or N/A
             difficulty_label = difficulty or (player_stats.get('difficulty') if player_stats and 'difficulty' in player_stats else 'N/A')
@@ -419,13 +427,6 @@ class ShareCardGenerator:
                 f"Score: {score}",
                 font=fonts['subtitle'],
                 fill=score_color,
-                anchor="mm"
-            )
-            draw.text(
-                (self.width//2, score_y),
-                f"Difficulty: {difficulty_label}",
-                font=fonts['subtitle'],
-                fill=self.colors['accent'],
                 anchor="mm"
             )
             draw.text(
@@ -550,3 +551,22 @@ def create_share_card(game_summary: Dict) -> str:
         player_stats=game_summary.get("player_stats"),
         difficulty=game_summary.get("difficulty")
     ) 
+
+def create_monthly_high_score_share_card(stats_manager) -> str:
+    """Generate a share card for the highest score achieved by the user in the current month, but only regenerate if older than 1 hour."""
+    high_score_game = stats_manager.get_highest_score_game_this_month()
+    if not high_score_game:
+        logger.info("No games played this month. No share card generated.")
+        return ""
+    # Determine output path
+    word = high_score_game["word"].lower()
+    nickname = high_score_game.get("nickname", "user")
+    output_path = os.path.join('game_data/share_cards', f'share_card_{nickname}_{word}_monthly.png')
+    # Check if file exists and is less than 1 hour old
+    if os.path.exists(output_path):
+        mtime = os.path.getmtime(output_path)
+        if time.time() - mtime < 3600:
+            logger.info(f"Returning cached share card: {output_path}")
+            return output_path
+    # Regenerate share card
+    return create_share_card({**high_score_game, "output_path": output_path}) 

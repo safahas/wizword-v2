@@ -14,7 +14,7 @@ def sample_game_summary():
         "subject": "Animals",
         "score": 10,
         "time_taken": 65.5,
-        "mode": "Challenge"
+        "mode": "Wiz"
     }
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def test_generate_share_card(share_card_generator, cleanup_share_cards):
         category="Animals",
         score=10,
         duration=65.5,
-        mode="Challenge"
+        mode="Wiz"
     )
     
     assert os.path.exists(output_path)
@@ -80,7 +80,7 @@ def test_custom_output_path(share_card_generator, cleanup_share_cards):
         category="Animals",
         score=10,
         duration=65.5,
-        mode="Challenge",
+        mode="Wiz",
         output_path=custom_path
     )
     

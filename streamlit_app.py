@@ -1,18 +1,4 @@
-import os
 import streamlit as st
-import json
-import re
-import time
-import random
-from backend.monitoring import logger  # Add monitoring logger
-print("📝 OPENROUTER_API_KEY =", os.getenv("OPENROUTER_API_KEY"))
-from pathlib import Path
-from backend.game_logic import GameLogic
-from backend.word_selector import WordSelector
-from backend.session_manager import SessionManager
-from backend.share_card import create_share_card
-from backend.share_utils import ShareUtils
-
 # Configure Streamlit page with custom theme
 st.set_page_config(
     page_title="WizWord - Word Guessing Game",
@@ -23,6 +9,29 @@ st.set_page_config(
         'About': "# WizWord - Word Guessing Game\nTest your deduction skills against AI!"
     }
 )
+# st.write("🚨 [DEBUG] THIS IS THE REAL streamlit_app.py - TEST MARKER")
+from backend.game_logic import GameLogic
+import os
+import streamlit as st
+import json
+import re
+import time
+import random
+from backend.monitoring import logger  # Add monitoring logger
+from pathlib import Path
+from backend.game_logic import GameLogic
+from backend.word_selector import WordSelector
+from backend.session_manager import SessionManager
+from backend.share_card import create_share_card
+from backend.share_utils import ShareUtils
+from backend.user_auth import register_user, login_user, load_user_profile
+
+
+
+BEAT_MODE_TIMEOUT_MINUTES = 5
+RECENT_WORDS_LIMIT = 50
+
+
 
 # Inject click sound JS (static directory)
 st.markdown("""
@@ -436,16 +445,6 @@ def validate_subject(subject: str) -> tuple[bool, str]:
         return False, f"Invalid subject. Must be one of: {', '.join(valid_categories)}"
     return True, ""
 
-def validate_nickname(nickname: str) -> tuple[bool, str]:
-    """Validate nickname with detailed feedback."""
-    if not nickname:
-        return True, ""  # Nickname is optional
-    if len(nickname) > 20:
-        return False, "Nickname cannot exceed 20 characters"
-    if not re.match(r'^[a-zA-Z0-9_-]+$', nickname):
-        return False, "Nickname can only contain letters, numbers, underscores, and hyphens"
-    return True, ""
-
 def check_rate_limit() -> tuple[bool, str]:
     """Check if user is asking questions too quickly."""
     current_time = time.time()
@@ -500,17 +499,8 @@ def display_player_stats():
 
 def main():
     """Main application entry point."""
-    print('[DEBUG] Top of main(), st.session_state:', dict(st.session_state))
-    # Initialize session state
-    if "game" not in st.session_state:
-        st.session_state.game = None
-    if "game_over" not in st.session_state:
-        st.session_state.game_over = False
-    if "game_summary" not in st.session_state:
-        st.session_state.game_summary = None
-    print('[DEBUG] Before play_again check, st.session_state:', dict(st.session_state))
+    # Handle play again before any game over checks
     if st.session_state.get('play_again', False):
-        print('[DEBUG] Creating new game for Play Again')
         prev_game = st.session_state.game
         orig_choice = st.session_state.get('original_word_length_choice', 'any')
         # If the original choice was 'any', randomize a new length each time
@@ -518,7 +508,6 @@ def main():
             new_length = random.randint(3, 10)
         else:
             new_length = orig_choice
-        print(f'[DEBUG] Play Again: orig_choice={orig_choice}, new_length={new_length}')
         orig_category = st.session_state.get('original_category_choice', 'any')
         if orig_category == 'any':
             new_category = random.choice(["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"])
@@ -528,7 +517,7 @@ def main():
             word_length=new_length,
             subject=new_category,
             mode=prev_game.mode,
-            nickname=prev_game.nickname,
+            nickname=st.session_state.user['username'],
             difficulty=prev_game.difficulty
         )
         if 'game_state' in st.session_state:
@@ -536,14 +525,86 @@ def main():
         st.session_state.game_over = False
         st.session_state.game_summary = None
         st.session_state['play_again'] = False
-    print('[DEBUG] After play_again check, st.session_state:', dict(st.session_state))
-    
+        st.session_state['just_finished_game'] = False
+        st.rerun()
+    # Display game over screen immediately if just finished
+    if st.session_state.get('just_finished_game', False):
+        display_game_over(st.session_state.game_summary)
+        st.stop()
+    # Defensive: Prevent re-initialization of game in Fun mode after game over
+    if st.session_state.get('game_over', False) and st.session_state.game and st.session_state.game.mode == 'Fun':
+        display_game_over(st.session_state.game_summary)
+        st.stop()
+    # User authentication state
+    if "user" not in st.session_state:
+        st.session_state.user = None
+    if "login_error" not in st.session_state:
+        st.session_state.login_error = ""
+    if "register_error" not in st.session_state:
+        st.session_state.register_error = ""
+    # If not logged in, show login/register UI
+    if not st.session_state.user:
+        st.markdown("<div class='game-title'>WizWord</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='text-align:center; margin-top:-18px; margin-bottom:18px;'>
+            <span style='font-size:1.1em; color:#fff; opacity:0.85; letter-spacing:0.04em;'>AI powered word guess game</span>
+        </div>
+        """, unsafe_allow_html=True)
+        tabs = st.tabs(["Login", "Register"])
+        with tabs[0]:
+            st.subheader("Login to your account")
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.button("Login"):
+                user = login_user(email, password)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.login_error = ""
+                    st.rerun()
+                else:
+                    st.session_state.login_error = "Invalid email or password."
+            if st.session_state.login_error:
+                st.error(st.session_state.login_error)
+        with tabs[1]:
+            st.subheader("Create a new account")
+            reg_email = st.text_input("Email", key="reg_email")
+            reg_username = st.text_input("User Name", key="reg_username")
+            reg_password = st.text_input("Password", type="password", key="reg_password")
+            reg_password2 = st.text_input("Confirm Password", type="password", key="reg_password2")
+            if st.button("Register"):
+                if reg_password != reg_password2:
+                    st.session_state.register_error = "Passwords do not match."
+                else:
+                    err = register_user(reg_email, reg_username, reg_password)
+                    if err:
+                        st.session_state.register_error = err
+                    else:
+                        st.success("Registration successful! Please log in.")
+                        st.session_state.register_error = ""
+            if st.session_state.register_error:
+                st.error(st.session_state.register_error)
+        return
+    # If logged in, show welcome and logout
+    # Remove the 'Welcome, username!' message from here
+    # Continue with game setup and logic
+    # Initialize session state
+    if "game" not in st.session_state:
+        st.session_state.game = None
+    if "game_over" not in st.session_state:
+        st.session_state.game_over = False
+    if "game_summary" not in st.session_state:
+        st.session_state.game_summary = None
+        
     # Display welcome screen if no game is active
     if not st.session_state.game:
         display_welcome()
         return
         
     # Display game over screen if game is finished
+    if st.session_state.get('just_finished_game', False):
+        st.session_state.just_finished_game = False
+        display_game_over(st.session_state.game_summary)
+        return
     if st.session_state.game_over and st.session_state.game_summary:
         display_game_over(st.session_state.game_summary)
         return
@@ -553,29 +614,34 @@ def main():
 
 def display_welcome():
     """Display the welcome screen and game setup."""
+    if st.session_state.get('game'):
+        return  # Defensive: never show settings if a game is active
+    # Show welcome message if user is logged in
+    if st.session_state.get('user'):
+        st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><b>Welcome, {st.session_state.user['username']}!</b></div>", unsafe_allow_html=True)
     st.markdown("<div class='game-title'>WizWord</div>", unsafe_allow_html=True)
-    
+    st.markdown("""
+    <div style='text-align:center; margin-top:-18px; margin-bottom:18px;'>
+        <span style='font-size:1.1em; color:#fff; opacity:0.85; letter-spacing:0.04em;'>AI powered word guess game</span>
+    </div>
+    """, unsafe_allow_html=True)
     # Create two columns
     left_col, right_col = st.columns([1, 1])  # Equal width columns
-    
     # Left column - Game Settings
     with left_col:
         st.markdown("### ⚙️ Game Settings")
-        # Game setup form (move from right_col here)
         with st.form("game_setup", clear_on_submit=False):
-            # Start button in its own row at the top
             start_col = st.columns([1])[0]
             start_pressed = start_col.form_submit_button(
-                "🎯 Start!" if st.session_state.get('game_mode', 'Fun') == "Challenge" else "🎯 Start Game!",
+                "🎯 Start!" if st.session_state.get('game_mode', 'Fun') == "Wiz" else "🎯 Start Game!",
                 use_container_width=True
             )
-            # Second row: Game Mode and Category (side by side), then Nickname if needed
-            cols = st.columns([2, 2, 2])  # [Game Mode, Category, Nickname]
+            cols = st.columns([2, 2])  # [Game Mode, Category]
             with cols[0]:
                 mode = st.selectbox(
                     "Game Mode",
-                    options=["Fun", "Challenge"],
-                    help="Challenge mode includes scoring and leaderboards",
+                    options=["Fun", "Wiz", "Beat"],
+                    help="Wiz mode includes scoring and leaderboards",
                     index=0,
                     key="game_mode"
                 )
@@ -583,99 +649,86 @@ def display_welcome():
             with cols[1]:
                 subject = st.selectbox(
                     "Category",
-                    options=["any", "general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"],
-                    index=0,
+                    options=["any", "4th_grade", "general", "animals", "food", "places", "science", "tech", "sports"],
+                    index=2,  # Set default to 'general'
                     help="Word category (select 'any' for random category)"
                 )
                 st.session_state['original_category_choice'] = subject
                 resolved_subject = random.choice(["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]) if subject == "any" else subject
             word_length = "any"
             st.session_state['original_word_length_choice'] = word_length
-            with cols[2]:
-                if mode == "Challenge":
-                    nickname = st.text_input(
-                        "Nickname",
-                        help="Required for Challenge mode",
-                        placeholder="Enter nickname",
-                        key="nickname_input"
-                    ).strip()
-                else:
-                    nickname = ""
             if start_pressed:
-                if mode == "Challenge" and not nickname:
-                    st.error("Please enter a nickname for Challenge mode!")
-                    return
+                selected_mode = st.session_state.get("game_mode", mode)
                 st.session_state.game = GameLogic(
                     word_length=word_length,
                     subject=resolved_subject,
-                    mode=mode,
-                    nickname=nickname,
+                    mode=selected_mode,
+                    nickname=st.session_state.user['username'],
                     difficulty=difficulty
                 )
-                # Scroll to top when game starts
                 st.markdown("""
                     <script>
                         window.parent.scrollTo({top: 0, behavior: 'smooth'});
                     </script>
                 """, unsafe_allow_html=True)
                 st.rerun()
-
+        # Add Exit button below the form
+        if st.button("🚪 Exit", key="exit_btn"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
     # Right column - Instructions
     with right_col:
-        # Quick start guide always visible
         st.markdown("""
         ### Quick Start 🚀
-        1. Select game mode and difficulty
-        2. Choose word category and length
+        1. Select your game mode (Fun, Wiz, or Beat)
+        2. Choose a word category (or pick 'any' for random)
         3. Click 'Start Game' to begin!
         """)
-        
-        # Detailed instructions in expandable sections
         with st.expander("📖 How to Play", expanded=False):
             st.markdown("""
             ### Game Instructions:
-            1. Choose your game settings
-            2. Ask questions or request hints to help you guess the word
-            3. Make your best guess at any time
-            4. In Challenge mode, manage your score carefully!
+            - Choose your game mode:
+                - **Fun**: Unlimited play, no timer, just for fun.
+                - **Wiz**: Classic mode with stats and leaderboards.
+                - **Beat**: Timed challenge—solve as many words as possible before time runs out.
+            - Select a word category, or pick 'any' for a random challenge.
+            - Ask yes/no questions or request hints to help you guess the word.
+            - Enter your guess at any time.
+            **Beat Mode Details:**
+            - You have 5 minutes to play.
+            - For each word, you can:
+                - **Guess the word:**
+                    - Correct: **+20 × word length**
+                    - Wrong: **-10**
+                - **Ask yes/no questions:** **-1** each
+                - **Request hints:** **-10** each (max 7 per word)
+                - **Skip the word:** **-10** (new word loaded)
+            - Try to solve as many words as possible and maximize your score before time runs out!
+            - Only Medium difficulty is available for all modes.
             """)
-            
         with st.expander("💡 Hints System", expanded=False):
             st.markdown("""
             - Easy Mode: Up to 10 hints available (-5 points each)
             - Medium Mode: Up to 7 hints available (-10 points each)
             - Hard Mode: Up to 5 hints available (-15 points each)
             """)
-            
-        with st.expander("🎯 Difficulty & Scoring", expanded=False):
+        with st.expander("🎯 Scoring", expanded=False):
             st.markdown("""
-            ### Easy Mode
-            - 10 hints available
-            - Questions: -1 point
-            - Hints: -5 points
-            - Wrong guesses: -5 points
-            - Base points multiplier: 25x word length
-
-            ### Medium Mode
-            - 7 hints available
-            - Questions: -1 point
-            - Hints: -10 points
-            - Wrong guesses: -10 points
-            - Base points multiplier: 20x word length
-
-            ### Hard Mode
-            - 5 hints available
-            - Questions: -2 points
-            - Hints: -15 points
-            - Wrong guesses: -15 points
-            - Base points multiplier: 15x word length
-            - Time bonus: +50 points (under 1 min), +25 points (under 2 mins)
+            ### Medium Difficulty (Only Option)
+            - 7 hints available per word
+            - Questions: **-1** point each
+            - Hints: **-10** points each
+            - Wrong guesses: **-10** points
+            - Skip word: **-10** points (loads a new word)
+            - Correct guess: **+20 × word length**
+            - 5 minutes to solve as many words as possible in Beat mode
+            - Try to maximize your score before time runs out!
             """)
-            
         with st.expander("💭 Tips & Strategy", expanded=False):
             st.markdown("""
-            - Use hints strategically - they cost more points than questions
-            - In Hard mode, try to solve quickly for time bonus
+            - Use hints strategically—they cost more points than questions
+            - In Beat mode, time is limited—work quickly and don't get stuck on one word
             - Keep track of your score before making guesses
             - Questions are cheaper than wrong guesses
             """)
@@ -685,10 +738,303 @@ def display_game():
     if "game" not in st.session_state:
         st.error("No active game found. Please start a new game.")
         return
-
     game = st.session_state.game
+    # Only show and use Beat mode state if in Beat mode
+    if game.mode == "Beat":
+        ensure_beat_mode_state()
+    user_name = st.session_state.user['username'] if st.session_state.get('user') else ''
+
     max_hints = game.current_settings["max_hints"]
 
+    # --- BEAT MODE: Defensive initialization before any use ---
+    if getattr(game, "mode", None) == "Beat":
+        if "beat_word_count" not in st.session_state:
+            st.session_state.beat_word_count = 0
+        if "beat_score" not in st.session_state:
+            st.session_state.beat_score = 0
+        if "beat_time_left" not in st.session_state:
+            st.session_state.beat_time_left = BEAT_MODE_TIMEOUT_MINUTES * 60
+        if "beat_start_time" not in st.session_state:
+            st.session_state.beat_start_time = time.time()
+
+    # --- BEAT MODE ---
+    if game.mode == "Beat":
+        # (Removed st.write for last 25 chosen words)
+        # Clear per-word fields when a new word is loaded
+        if st.session_state.get("_last_beat_word_count", None) != st.session_state.beat_word_count:
+            for key in ("show_word_for_count", "show_word_until"):
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.session_state["_last_beat_word_count"] = st.session_state.beat_word_count
+            # Clear per-word fields
+            st.session_state["last_beat_hint"] = ""
+            st.session_state["clear_guess_field"] = True
+            st.session_state[f"beat_question_input_{st.session_state.beat_word_count}"] = ""
+        elapsed = time.time() - st.session_state.beat_start_time
+        time_left = max(0, BEAT_MODE_TIMEOUT_MINUTES * 60 - int(elapsed))
+        st.session_state.beat_time_left = time_left
+        # --- WIZWORD BANNER (same as Wiz mode) ---
+        timer_placeholder = st.empty()
+        def render_banner():
+            stats_html = f"""
+            <div class='wizword-banner'>
+              <div class='wizword-banner-title'>WizWord</div>
+              <div class='wizword-banner-stats'>
+            """
+            stats_html += f"<span class='wizword-stat'><b>🎮</b> Beat</span>"
+            stats_html += f"<span class='wizword-stat'><b>⏰</b> {time_left // 60}m {time_left % 60}s</span>"
+            stats_html += f"<span class='wizword-stat'><b>🏆</b> {st.session_state.beat_score}</span>"
+            stats_html += f"<span class='wizword-stat'><b>🔢</b> {st.session_state.beat_word_count}</span>"
+            stats_html += "</div></div>"
+            stats_html += """
+            <style>
+            .wizword-banner {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                justify-content: space-between;
+                background: linear-gradient(90deg, #FF6B6B 0%, #FFD93D 50%, #4ECDC4 100%);
+                color: #fff;
+                padding: 10px 24px 10px 24px;
+                margin: 10px 0 18px 0;
+                border-radius: 16px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10),
+                            inset 0 -2px 0px rgba(0, 0, 0, 0.07);
+                -webkit-text-stroke: 1px #222;
+                text-stroke: 1px #222;
+                text-shadow: 1px 1px 4px rgba(0,0,0,0.13),
+                             0 1px 4px rgba(0,0,0,0.08);
+                transition: box-shadow 0.2s, background 0.2s;
+            }
+            .wizword-banner-title {
+                font-family: 'Baloo 2', 'Poppins', 'Arial Black', Arial, sans-serif !important;
+                font-size: 1.5em;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                margin-right: 24px;
+                flex: 0 0 auto;
+            }
+            .wizword-banner-stats {
+                display: flex;
+                flex-direction: row;
+                gap: 18px;
+                font-size: 1.1em;
+                font-weight: 600;
+                align-items: center;
+            }
+            .wizword-stat {
+                background: rgba(0,0,0,0.13);
+                border-radius: 8px;
+                padding: 4px 12px;
+                margin-left: 0;
+                margin-right: 0;
+                min-width: 60px;
+                text-align: center;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+            }
+            </style>
+            """
+            timer_placeholder.markdown(stats_html, unsafe_allow_html=True)
+        render_banner()
+        # --- END FLEX BANNER ---
+        # Create main two-column layout (same as Wiz mode)
+        left_col, right_col = st.columns([1, 3])
+        with left_col:
+            st.markdown("### 🎯 Make a Guess")
+            actual_length = len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+            guess_key = f"beat_guess_{st.session_state.beat_word_count}"
+            # Only clear the guess field BEFORE widget creation
+            if guess_key not in st.session_state or st.session_state.get("clear_guess_field", False):
+                st.session_state[guess_key] = ""
+                st.session_state["clear_guess_field"] = False
+            with st.form(key="beat_guess_form"):
+                guess = st.text_input(
+                    "Enter your guess:",
+                    placeholder=f"Enter a {actual_length}-letter word",
+                    help=f"Must be exactly {actual_length} letters",
+                    key=guess_key
+                )
+                submit_guess = st.form_submit_button("Submit Guess", use_container_width=True)
+            if submit_guess:
+                if not guess:
+                    st.error("Please enter a guess!")
+                else:
+                    is_correct, message, points = game.make_guess(guess)
+                    st.session_state.beat_score = game.score
+                    if is_correct:
+                        st.success(message)
+                        if game.mode == "Beat":
+                            st.session_state.beat_word_count += 1
+                            st.session_state["clear_guess_field"] = True
+                            # Only create a new GameLogic instance if the word was solved in Beat mode
+                            # --- RANDOMIZE word_length and subject if original choice was 'any' ---
+                            orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
+                            orig_category = st.session_state.get('original_category_choice', game.subject)
+                            new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+                            categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
+                            new_subject = random.choice(categories) if orig_category == "any" else game.subject
+                            st.session_state.game = GameLogic(
+                                word_length=new_word_length,
+                                subject=new_subject,
+                                mode=game.mode,
+                                nickname=game.nickname,
+                                difficulty=game.difficulty,
+                                initial_score=game.score  # carry over score
+                            )
+                            # (Removed print for last 25 chosen words)
+                            st.rerun()
+                        else:
+                            # In Fun mode, trigger game over and set just_finished_game flag
+                            st.session_state.game_over = True
+                            st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
+                            st.session_state.just_finished_game = True
+                            st.rerun()
+                    else:
+                        st.error(message)
+                        st.rerun()
+            # (Skip and Exit buttons removed from left_col)
+        with right_col:
+            with st.container():
+                hints_remaining = max_hints - len(game.hints_given)
+                hint_display = st.empty()
+                if st.button(f"💡 Get Hint ({hints_remaining}/{max_hints})", 
+                            disabled=len(game.hints_given) >= max_hints,
+                            use_container_width=True,
+                            key=f"beat_hint_button_{st.session_state.beat_word_count}"):
+                    hint, points = game.get_hint()
+                    st.session_state.beat_score = game.score  # Use GameLogic's score
+                    if points != 0:
+                        st.warning(f"{points:+.1f} points", icon="⚠️")
+                    if hint in ["Game is already over!", f"Maximum hints ({max_hints}) reached!"]:
+                        st.warning(hint)
+                    else:
+                        st.session_state.last_beat_hint = hint
+                # Always display the last hint if available
+                if hasattr(st.session_state, 'last_beat_hint') and st.session_state.last_beat_hint:
+                    hint_display.markdown(f'<div data-testid="hint-text">💡 Hint: {st.session_state.last_beat_hint}</div>', unsafe_allow_html=True)
+            # Move Show Word button below question field
+            is_fallback = game.word_selector.use_fallback
+            if is_fallback:
+                question_placeholder = "Example: Is the first letter 'A'? (Press Enter to ask)"
+                help_text = "In fallback mode, you can only ask about first or last letter"
+            else:
+                question_placeholder = "Example: Is it used in everyday life? (Press Enter to ask)"
+                help_text = "Ask about the word's meaning or properties"
+            with st.container():
+                question = st.text_input(
+                    "Ask a yes/no question about the word:",
+                    placeholder=question_placeholder,
+                    help=help_text,
+                    key=f"beat_question_input_{game.guesses_made}"
+                )
+                if question:
+                    rate_limit_ok, message = check_rate_limit()
+                    if not rate_limit_ok:
+                        st.warning(message)
+                    else:
+                        is_valid, answer, points = game.ask_question(question)
+                        st.session_state.beat_score = game.score  # Use GameLogic's score
+                        if not is_valid:
+                            st.warning(answer)
+                        else:
+                            if points != 0:
+                                st.warning(f"{points:+.1f} points", icon="⚠️")
+                            st.success(answer)
+                            display_rate_limit_warning()
+            # Remove any Show Word display logic from here; only display in button row below
+            # Place Skip and Exit buttons at the bottom of the right column
+            st.markdown("<div style='flex:1 1 auto; min-height:40px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='height:100px;'></div>", unsafe_allow_html=True)
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                # Only use beat_word_count if in Beat mode, else use guesses_made
+                word_count = st.session_state.beat_word_count if ("beat_word_count" in st.session_state and game.mode == "Beat") else game.guesses_made
+                import time as _time
+                # Always render the Show Word button
+                if st.button("👀 Show Word", use_container_width=True, key="beat_show_word_btn"):
+                    penalty = game.apply_show_word_penalty()
+                    st.session_state.show_word_for_count = word_count
+                    st.session_state.show_word_until = _time.time() + 10
+                    st.warning(f"⚠️ {penalty:+.1f} points penalty for revealing the word!", icon="⚠️")
+                    if hasattr(st.session_state, 'beat_score'):
+                        st.session_state.beat_score = game.score
+                show_word = (
+                    st.session_state.get("show_word_for_count", -1) == word_count and
+                    st.session_state.get("show_word_until", 0) > _time.time()
+                )
+                if show_word:
+                    st.info(f"Word: **{game.selected_word}**", icon="🤫")
+                    _time.sleep(1)
+                    st.rerun()
+                else:
+                    # Clean up stale state if timer expired or word count changed
+                    for key in ("show_word_for_count", "show_word_until"):
+                        if key in st.session_state:
+                            del st.session_state[key]
+            with btn_col2:
+                # Always ensure Beat mode state before using beat_word_count
+                if game.mode == "Beat":
+                    ensure_beat_mode_state()
+                    # Skip Word button (Beat mode only)
+                    if st.button("⏭️", use_container_width=True, key="beat_skip_word_btn"):
+                        st.session_state.beat_score -= 10
+                        st.session_state.beat_word_count += 1
+                        st.session_state["clear_guess_field"] = True
+                        st.session_state["last_beat_hint"] = ""
+                        st.session_state[f"beat_question_input_{st.session_state.beat_word_count}"] = ""
+                        # Remove any show_word or show_word_for_count for the new word
+                        for key in ("show_word_for_count", "show_word_until", "show_word"):
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        # --- Load a new word by creating a new GameLogic instance ---
+                        game = st.session_state.game
+                        orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
+                        orig_category = st.session_state.get('original_category_choice', game.subject)
+                        new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+                        categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
+                        new_subject = random.choice(categories) if orig_category == "any" else game.subject
+                        st.session_state.game = GameLogic(
+                            word_length=new_word_length,
+                            subject=new_subject,
+                            mode=game.mode,
+                            nickname=game.nickname,
+                            difficulty=game.difficulty,
+                            initial_score=st.session_state.beat_score
+                        )
+                        # (Removed print for last 25 chosen words)
+                        print("[DEBUG] New word after skip:", st.session_state.game.selected_word)
+                        st.warning("You skipped the word! -10 points.", icon="⚠️")
+                        st.rerun()
+                # Do not render Skip button in Wiz or Fun mode
+                # Restart Game button
+                if st.button("🔄 Restart Game", use_container_width=True, key="restart_btn"):
+                    reset_game()
+                    st.rerun()
+                # Logout button (below Restart Game)
+                if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+                    st.session_state.user = None
+                    st.rerun()
+        # Timer auto-refresh logic (always rerun every second if not game over)
+        if time_left <= 0:
+            if not st.session_state.get('game_over', False):
+                st.session_state.game_over = True
+                st.session_state.game_summary = game.get_game_summary()
+                st.session_state.beat_time_left = 0
+                st.session_state.beat_timer_expired = True
+                st.rerun()
+            else:
+                st.info('⏰ Time is up! Game over.')
+            return
+        import time as _time
+        _time.sleep(1)
+        st.rerun()
+        return
+
+    print("[DEBUG] Entering legacy UI block (should NOT see this in Beat mode)")
+    # Defensive: Beat mode should never reach here
+    if game.mode == "Beat":
+        st.error("Unexpected: Beat mode should not reach legacy UI block.")
+        return
     # --- FLEX BANNER WITH TITLE LEFT, STATS RIGHT ---
     stats_html = """
     <div class='wizword-banner'>
@@ -696,7 +1042,7 @@ def display_game():
       <div class='wizword-banner-stats'>
     """
     stats_html += f"<span class='wizword-stat'><b>🎮</b> {game.mode}</span>"
-    if game.mode == "Challenge":
+    if game.mode == "Wiz":
         stats_html += f"<span class='wizword-stat'><b>🏆</b> {game.score}</span>"
         stats_html += f"<span class='wizword-stat'><b>🎯</b> {game.guesses_made}</span>"
         stats_html += f"<span class='wizword-stat'><b>💡</b> {max_hints - len(game.hints_given)}/{max_hints}</span>"
@@ -761,34 +1107,66 @@ def display_game():
     # Left column - Game Controls
     with left_col:
         st.markdown("### 🎯 Make a Guess")
-        actual_length = len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else game.word_length
-        with st.form(key="guess_form"):
+        actual_length = len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+        guess_key = f"beat_guess_{game.guesses_made}"  # Use guesses_made for non-Beat modes
+        # Only clear the guess field BEFORE widget creation
+        if guess_key not in st.session_state or st.session_state.get("clear_guess_field", False):
+            st.session_state[guess_key] = ""
+            st.session_state["clear_guess_field"] = False
+        with st.form(key="beat_guess_form"):
             guess = st.text_input(
                 "Enter your guess:",
                 placeholder=f"Enter a {actual_length}-letter word",
                 help=f"Must be exactly {actual_length} letters",
-                key="guess_input"
+                key=guess_key
             )
-            submit_guess = st.form_submit_button("Submit Guess")
+            submit_guess = st.form_submit_button("Submit Guess", use_container_width=True)
         if submit_guess:
             if not guess:
                 st.error("Please enter a guess!")
             else:
                 is_correct, message, points = game.make_guess(guess)
+                st.session_state.beat_score = game.score
                 if is_correct:
-                    st.balloons()
+                    print(f"[DEBUG] Correct guess detected. Mode: {game.mode}")
                     st.success(message)
-                    st.session_state.game_over = True
-                    st.session_state.game_summary = game.get_game_summary()
-                    st.rerun()
+                    if game.mode == "Beat":
+                        st.session_state.beat_word_count += 1
+                        st.session_state["clear_guess_field"] = True
+                        # Only create a new GameLogic instance if the word was solved in Beat mode
+                        # --- RANDOMIZE word_length and subject if original choice was 'any' ---
+                        orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
+                        orig_category = st.session_state.get('original_category_choice', game.subject)
+                        new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+                        categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
+                        new_subject = random.choice(categories) if orig_category == "any" else game.subject
+                        st.session_state.game = GameLogic(
+                            word_length=new_word_length,
+                            subject=new_subject,
+                            mode=game.mode,
+                            nickname=game.nickname,
+                            difficulty=game.difficulty,
+                            initial_score=game.score  # carry over score
+                        )
+                        # (Removed print for last 25 chosen words)
+                        st.rerun()
+                    else:
+                        # In Fun mode, trigger game over and set just_finished_game flag
+                        st.session_state.game_over = True
+                        st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
+                        st.session_state.just_finished_game = True
+                        st.rerun()
                 else:
                     st.error(message)
+                    st.rerun()
+            # (Skip and Exit buttons removed from left_col)
 
     # Right column - Game Operations
     with right_col:
         # Hint section with combined button
         with st.container():
             hints_remaining = max_hints - len(game.hints_given)
+            hint_display = st.empty()
             if st.button(f"💡 Get Hint ({hints_remaining}/{max_hints})", 
                         disabled=len(game.hints_given) >= max_hints,
                         use_container_width=True,
@@ -799,12 +1177,10 @@ def display_game():
                 if hint in ["Game is already over!", f"Maximum hints ({max_hints}) reached!"]:
                     st.warning(hint)
                 else:
-                    st.markdown(f'<div data-testid="hint-text">💡 Hint #{len(game.hints_given)}: {hint}</div>', unsafe_allow_html=True)
-            # Display previous hints
-            if game.hints_given:
-                with st.expander("Previous Hints", expanded=False):
-                    for i, hint in enumerate(game.hints_given, 1):
-                        st.markdown(f'{i}. {hint}')
+                    st.session_state.last_beat_hint = hint
+            # Always display the last hint if available
+            if hasattr(st.session_state, 'last_beat_hint') and st.session_state.last_beat_hint:
+                hint_display.markdown(f'<div data-testid="hint-text">💡 Hint: {st.session_state.last_beat_hint}</div>', unsafe_allow_html=True)
         # Question input - directly in the interface
         is_fallback = game.word_selector.use_fallback
         if is_fallback:
@@ -818,15 +1194,15 @@ def display_game():
                 "Ask a yes/no question about the word:",
                 placeholder=question_placeholder,
                 help=help_text,
-                key="question_input"
+                key=f"beat_question_input_{game.guesses_made}"
             )
             if question:
                 rate_limit_ok, message = check_rate_limit()
                 if not rate_limit_ok:
                     st.warning(message)
                 else:
-                    st.session_state.game_state["last_question_time"] = time.time()
                     is_valid, answer, points = game.ask_question(question)
+                    st.session_state.beat_score = game.score  # Use GameLogic's score
                     if not is_valid:
                         st.warning(answer)
                     else:
@@ -842,7 +1218,7 @@ def display_game():
                 for i, qa in enumerate(game.questions_asked, 1):
                     st.write(f"Q{i}: {qa['question']}")
                     st.write(f"A: {qa['answer']}")
-                    if game.mode == "Challenge" and qa['points_added'] != 0:
+                    if game.mode == "Wiz" and qa['points_added'] != 0:
                         st.write(f"Points: {qa['points_added']}")
                     st.divider()
             else:
@@ -856,18 +1232,63 @@ def display_game():
             <div style='height:100px;'></div>
             <div style='position: absolute; bottom: 30px; right: 0; width: 90%; z-index: 10;'>
         """, unsafe_allow_html=True)
-        btn_cols = st.columns(2)
+        btn_cols = st.columns(3)
         with btn_cols[0]:
-            if st.button("👀 Show Word", use_container_width=True, key="show_word_btn"):
-                if game.mode == "Challenge":
-                    points_deducted = game.apply_show_word_penalty()
-                    st.warning(f"⚠️ {points_deducted:+.1f} points! (Penalty: -20 points per letter for revealing the word)", icon="⚠️")
+            # Only use beat_word_count if in Beat mode, else use guesses_made
+            word_count = st.session_state.beat_word_count if ("beat_word_count" in st.session_state and game.mode == "Beat") else game.guesses_made
+            import time as _time
+            # Always render the Show Word button
+            if st.button("👀 Show Word", use_container_width=True, key="beat_show_word_btn"):
+                penalty = game.apply_show_word_penalty()
+                st.session_state.show_word_for_count = word_count
+                st.session_state.show_word_until = _time.time() + 10
+                st.warning(f"⚠️ {penalty:+.1f} points penalty for revealing the word!", icon="⚠️")
+                if hasattr(st.session_state, 'beat_score'):
+                    st.session_state.beat_score = game.score
+            show_word = (
+                st.session_state.get("show_word_for_count", -1) == word_count and
+                st.session_state.get("show_word_until", 0) > _time.time()
+            )
+            if show_word:
                 st.info(f"Word: **{game.selected_word}**", icon="🤫")
+                _time.sleep(1)
+                st.rerun()
+            else:
+                # Clean up stale state if timer expired or word count changed
+                for key in ("show_word_for_count", "show_word_until"):
+                    if key in st.session_state:
+                        del st.session_state[key]
         with btn_cols[1]:
+            # Always ensure Beat mode state before using beat_word_count
+            if game.mode == "Beat":
+                ensure_beat_mode_state()
+                # Skip Word button
+                if st.button("⏭️", use_container_width=True, key="beat_skip_word_btn"):
+                    st.session_state.beat_score -= 10
+                    if game.mode == "Beat":
+                        st.session_state.beat_word_count += 1
+                    st.session_state["clear_guess_field"] = True
+                    st.session_state["last_beat_hint"] = ""
+                    if game.mode == "Beat":
+                        st.session_state[f"beat_question_input_{st.session_state.beat_word_count}"] = ""
+                    # Remove any show_word or show_word_for_count for the new word
+                    for key in ("show_word_for_count", "show_word_until", "show_word"):
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.warning("You skipped the word! -10 points.", icon="⚠️")
+                    st.rerun()
+            # Restart Game button
             if st.button("🔄 Restart Game", use_container_width=True, key="restart_btn"):
                 reset_game()
                 st.rerun()
+            # Logout button (below Restart Game)
+            if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+                st.session_state.user = None
+                st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
+
+    if user_name:
+        st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><b>User: {user_name}</b></div>", unsafe_allow_html=True)
 
 def display_game_over(game_summary):
     """Display game over screen with statistics and sharing options."""
@@ -878,12 +1299,16 @@ def display_game_over(game_summary):
       <div class='wizword-banner-stats'>
     """
     mode = game_summary.get('mode', 'Fun')
-    score = game_summary.get('score', 0)
+    # Use live Beat score from session state if in Beat mode
+    if mode == "Beat":
+        score = st.session_state.get('beat_score', 0)
+    else:
+        score = game_summary.get('score', 0)
     guesses = game_summary.get('guesses_made', len(game_summary.get('questions_asked', [])))
     hints = game_summary.get('max_hints', 7)
     hints_used = len(game_summary.get('hints_given', []))
     stats_html += f"<span class='wizword-stat'><b>🎮</b> {mode}</span>"
-    if mode == "Challenge":
+    if mode == "Wiz":
         stats_html += f"<span class='wizword-stat'><b>🏆</b> {score}</span>"
         stats_html += f"<span class='wizword-stat'><b>🎯</b> {guesses}</span>"
         stats_html += f"<span class='wizword-stat'><b>💡</b> {hints-hints_used}/{hints}</span>"
@@ -950,7 +1375,7 @@ def display_game_over(game_summary):
         # Game summary
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Final Score", game_summary["score"])
+            st.metric("Final Score", score)
         with col2:
             st.metric("Questions Asked", len(game_summary["questions_asked"]))
         with col3:
@@ -981,14 +1406,14 @@ def display_game_over(game_summary):
         
         # Leaderboard
         st.markdown("### 🏆 Leaderboard")
-        mode = st.selectbox("Game Mode", ["All", "Fun", "Challenge"], key="leaderboard_mode")
+        leaderboard_mode = st.selectbox("Game Mode", ["All", "Fun", "Wiz"], key="leaderboard_mode")
         # Convert categories to title case for display
         display_categories = ["All"] + [cat.title() for cat in WordSelector.CATEGORIES]
         category = st.selectbox("Category", display_categories, key="leaderboard_category")
         
         if st.session_state.game and hasattr(st.session_state.game, 'get_leaderboard'):
             leaderboard = st.session_state.game.get_leaderboard(
-                mode if mode != "All" else None,
+                leaderboard_mode if leaderboard_mode != "All" else None,
                 category.lower() if category != "All" else None  # Convert back to lowercase for backend
             )
             
@@ -1004,7 +1429,7 @@ def display_game_over(game_summary):
             st.info("Leaderboard is not available for this game.")
         
         # Daily stats
-        st.markdown("### 📅 Daily Challenge Stats")
+        st.markdown("### 📅 Daily Wiz Stats")
         if st.session_state.game and hasattr(st.session_state.game, 'get_daily_stats'):
             daily_stats = st.session_state.game.get_daily_stats()
             
@@ -1026,11 +1451,13 @@ def display_game_over(game_summary):
     
     with share_tab:
         st.markdown("### 🔗 Share Your Achievement!")
-        
-        # Generate share card
+        # Generate share card for this game
         if st.button("Generate Share Card"):
             with st.spinner("Generating share card..."):
-                share_card_path = create_share_card(game_summary)
+                game_summary_for_card = dict(game_summary)
+                if mode == "Beat":
+                    game_summary_for_card["score"] = st.session_state.get('beat_score', 0)
+                share_card_path = create_share_card(game_summary_for_card)
                 if share_card_path:
                     st.image(share_card_path, caption="Your Share Card")
                     st.download_button(
@@ -1039,6 +1466,24 @@ def display_game_over(game_summary):
                         file_name="word_guess_share.png",
                         mime="image/png"
                     )
+        # --- NEW: Generate and display highest score share card for this month ---
+        from backend.share_card import create_monthly_high_score_share_card
+        stats_manager = None
+        if hasattr(st.session_state.game, 'stats_manager'):
+            stats_manager = st.session_state.game.stats_manager
+        if stats_manager and st.button("Show My Highest Score This Month Card"):
+            with st.spinner("Generating monthly high score share card..."):
+                high_score_card_path = create_monthly_high_score_share_card(stats_manager)
+                if high_score_card_path:
+                    st.image(high_score_card_path, caption="Your Highest Score This Month")
+                    st.download_button(
+                        "Download Monthly High Score Card",
+                        open(high_score_card_path, "rb"),
+                        file_name="monthly_high_score_card.png",
+                        mime="image/png"
+                    )
+                else:
+                    st.info("No high score card available for this month.")
         
         # Share buttons
         share_text = share_utils.generate_share_text(game_summary)
@@ -1061,21 +1506,51 @@ def display_game_over(game_summary):
     # Play again and restart game buttons
     col1, col2 = st.columns(2)
     with col1:
-        if st.button('🔄 Another Word', key='play-again-btn'):
-            print('[DEBUG] Play Again button pressed')
+        another_label = '🔄 Another Beat' if mode == 'Beat' else '🔄 Another Word'
+        if st.button(another_label, key='play-again-btn'):
             st.session_state['restart_game'] = False
-            st.session_state['play_again'] = True
-            st.rerun()
+            if mode == 'Beat':
+                # Restart Beat mode with same settings
+                prev_game = st.session_state.game
+                st.session_state.beat_word_count = 0
+                st.session_state.beat_score = 0
+                st.session_state.beat_time_left = BEAT_MODE_TIMEOUT_MINUTES * 60
+                st.session_state.beat_start_time = time.time()
+                st.session_state.game = GameLogic(
+                    word_length=prev_game.word_length,
+                    subject=prev_game.subject,
+                    mode=prev_game.mode,
+                    nickname=prev_game.nickname,
+                    difficulty=prev_game.difficulty
+                )
+                st.session_state.game_over = False
+                st.session_state.game_summary = None
+                st.session_state['play_again'] = False
+                st.session_state['just_finished_game'] = False
+                st.rerun()
+            else:
+                st.session_state['play_again'] = True
+                st.rerun()
     with col2:
         if st.button('🧹 Restart Game', key='restart-game-btn'):
-            # Start fresh: clear all session state and return to welcome screen
+            # Start fresh: clear all session state except user info
+            user = st.session_state.get('user')
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
+            if user:
+                st.session_state['user'] = user
+            st.rerun()
 
 def reset_game():
-    """Reset the game state."""
-    if "game" in st.session_state:
-        del st.session_state.game
+    # Clear Beat mode stats
+    for key in [
+        "beat_word_count", "beat_score", "beat_time_left", "beat_start_time",
+        "last_beat_hint", "clear_guess_field", "beat_questions", "beat_hints",
+        "beat_guesses", "_last_beat_word_count", "show_word_for_count", "show_word_until", "show_word"
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state['game'] = None
     if "game_over" in st.session_state:
         del st.session_state.game_over
     if "game_summary" in st.session_state:
@@ -1138,12 +1613,20 @@ def display_hint_section(game):
     
     with col2:
         st.metric("Hints Left", hints_remaining)  # Use calculated hints remaining
-    
-    # Display previous hints
-    if game.hints_given:
-        st.markdown("#### Previous Hints:")
-        for i, hint in enumerate(game.hints_given, 1):
-            st.markdown(f"{i}. {hint}")
+
+def ensure_beat_mode_state():
+    if "beat_word_count" not in st.session_state:
+        st.session_state.beat_word_count = 0
+    if "beat_score" not in st.session_state:
+        st.session_state.beat_score = 0
+    if "beat_time_left" not in st.session_state:
+        st.session_state.beat_time_left = BEAT_MODE_TIMEOUT_MINUTES * 60
+    if "beat_start_time" not in st.session_state:
+        st.session_state.beat_start_time = time.time()
+    if "last_beat_hint" not in st.session_state:
+        st.session_state.last_beat_hint = ""
+    if "clear_guess_field" not in st.session_state:
+        st.session_state.clear_guess_field = False
 
 if __name__ == "__main__":
     main() 

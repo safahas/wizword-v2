@@ -1,5 +1,3 @@
-import streamlit as st
-from backend.game_logic import GameLogic
 
 def initialize_game():
     if 'game' not in st.session_state:
@@ -11,6 +9,7 @@ def initialize_game():
         st.session_state.messages = []
 
 def main():
+    st.write("[DEBUG] main called. st.session_state['game']:", st.session_state.get('game'))
     st.title("Word Guessing Game 🎮")
     
     # Initialize game state
@@ -22,7 +21,7 @@ def main():
         if 'game' not in st.session_state or st.button("New Game"):
             word_length = st.selectbox("Word Length", options=[3, 4, 5, 6, 7, 8], index=2)
             subject = st.selectbox("Subject", options=["General", "Animals", "Food", "Places", "Science"], index=0)
-            mode = st.selectbox("Game Mode", options=["Fun", "Challenge"], index=0)
+            mode = st.selectbox("Game Mode", options=["Fun", "Wiz"], index=0)
             st.session_state.game = GameLogic(word_length, subject, mode)
             st.session_state.messages = []
             st.success("New game started!")
@@ -70,8 +69,8 @@ def main():
             else:
                 st.warning("Please enter a guess first!")
 
-    # Show current score in Challenge mode
-    if st.session_state.game.mode == "Challenge":
+    # Show current score in Wiz mode
+    if st.session_state.game.mode == "Wiz":
         st.sidebar.metric("Current Score", st.session_state.game.score)
 
 if __name__ == "__main__":

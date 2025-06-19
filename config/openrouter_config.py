@@ -41,4 +41,4 @@ AVAILABLE_SUBJECTS = [
 ]
 
 # Scoring Configuration
-CHALLENGE_MODE_PENALTY = 10  # Points added for wrong answers in Challenge mode 
+CHALLENGE_MODE_PENALTY = 10  # Points added for wrong answers in Wiz mode 

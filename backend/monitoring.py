@@ -16,8 +16,10 @@ logs_dir = Path(__file__).parent.parent / 'logs'
 logs_dir.mkdir(exist_ok=True)
 
 # Configure logging
+# LOG_LEVEL can be set in your .env file to control logging verbosity (e.g., LOG_LEVEL=WARNING)
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(logs_dir / 'game.log'),

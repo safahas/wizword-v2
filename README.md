@@ -6,7 +6,7 @@ WizWord is an AI-powered word guessing game where players try to guess a hidden 
 
 - Multiple word categories (difficulty is now fixed per game)
 - AI-powered word selection and question answering
-- Fun and Challenge modes with strategic scoring system
+- Fun and Wiz modes with strategic scoring system
 - Optional nickname-based leaderboard
 - Local and cloud storage support
 - Mobile and desktop friendly UI
@@ -54,7 +54,7 @@ streamlit run streamlit_app.py
 1. Configure your game:
    - Word length is chosen randomly for each game (3-10 letters)
    - Select a category (General, Animals, Food, etc.)
-   - Pick game mode (Fun or Challenge)
+   - Pick game mode (Fun or Wiz)
    - Enter an optional nickname
 
 2. Game Modes:
@@ -65,7 +65,7 @@ streamlit run streamlit_app.py
    - Make multiple guesses
    - Perfect for learning and practice
 
-   ### Challenge Mode
+   ### Wiz Mode
    - Strategic scoring system:
      - Each question: -5 points
      - Wrong guess: -10 points
@@ -87,7 +87,7 @@ streamlit run streamlit_app.py
 4. Making Guesses:
    - Type your guess when ready
    - Guesses must match the word length for the current game
-   - In Challenge mode:
+   - In Wiz mode:
      - Wrong guesses cost 10 points
      - Correct guesses earn points based on word length and questions asked
      - Try to minimize questions to maximize your score!

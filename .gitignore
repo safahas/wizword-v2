@@ -1,12 +1,4 @@
 # Python
-# Ignore build artifacts and large files
-temp_build/
-source_new2.zip
-*.zip
-node_modules/
-build_temp/
-
-
 __pycache__/
 *.py[cod]
 *$py.class

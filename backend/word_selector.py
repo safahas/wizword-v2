@@ -9,7 +9,7 @@ from email.mime.text import MIMEText
 from typing import Tuple, Optional, Dict, List
 from pathlib import Path
 from dotenv import load_dotenv
-from backend.fallback_words import get_fallback_word
+from .fallback_words import get_fallback_word
 from .openrouter_monitor import (
     update_quota_from_response,
     check_rate_limits,
@@ -20,7 +20,8 @@ import re
 import base64
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -1956,55 +1957,51 @@ class WordSelector:
 
     # Change from a single set to a dict of sets for per-category tracking
     _recently_used_words_by_category = {}
-    _max_recent_words = 25  # Maximum number of words to remember per category
+    _max_recent_words = int(os.getenv("RECENT_WORDS_LIMIT", "50"))  # Set by .env or default to 50
 
-    def _add_recent_word(self, word: str, category: str):
-        cat = category.lower()
-        if cat not in self._recently_used_words_by_category:
-            self._recently_used_words_by_category[cat] = []
-        recent = self._recently_used_words_by_category[cat]
+    def _add_recent_word(self, word: str, username: str = "global"):
+        if username not in self._recently_used_words_by_user:
+            self._recently_used_words_by_user[username] = []
+        recent = self._recently_used_words_by_user[username]
         if word in recent:
             recent.remove(word)
         recent.insert(0, word)
         if len(recent) > self._max_recent_words:
             recent.pop()
 
-    def _is_recent_word(self, word: str, category: str) -> bool:
-        cat = category.lower()
-        return word in self._recently_used_words_by_category.get(cat, [])
+    def get_recently_used_words(self, username: str = "global") -> list:
+        return list(self._recently_used_words_by_user.get(username, []))
 
-    def _select_word_from_dictionary(self, word_length: int = 5, subject: str = "general") -> str:
-        """Select a word from the local dictionary (words.json) if available, otherwise use fallback_words.py."""
-        logger.info(f"[DEBUG] Entered _select_word_from_dictionary with subject='{subject}', word_length='{word_length}'")
-        logger.info(f"Selecting word from dictionary with length {word_length} and subject {subject}")
+    def clear_recent_words(self, username: str = "global"):
+        self._recently_used_words_by_user[username] = []
+        logger.info(f"Cleared recently used words list for user: {username}")
+
+    def _select_word_from_dictionary(self, word_length: int = 5, subject: str = "general", username: str = "global") -> str:
+        logger.info(f"[DEBUG] Entered _select_word_from_dictionary with subject='{subject}', word_length='{word_length}', username='{username}'")
+        # Get all possible words from hints.json for the subject
+        hints_file = os.path.join('backend', 'data', 'hints.json')
         try:
-            subject = subject.lower()
-            if subject == "tech":
-                subject = "science"
-            elif subject in ["movies", "music", "brands", "history"]:
-                subject = "general"
-            # Try words.json first
-            if hasattr(self, "words_data") and self.words_data:
-                candidate_words = self.words_data.get(subject, {}).get(str(word_length), [])
-                logger.info(f"[DEBUG] Candidate words for subject '{subject}', length '{word_length}': {candidate_words}")
-                logger.info(f"[DEBUG] Recently used words for subject '{subject}': {self._recently_used_words_by_category.get(subject, [])}")
-                words = [w for w in candidate_words if not self._is_recent_word(w, subject)]
-                logger.info(f"[DEBUG] After filtering recent words: {words}")
-                if words:
-                    word = random.choice(words)
-                    self._add_recent_word(word, subject)
-                    return word
-                else:
-                    logger.warning(f"[DEBUG] Fallback triggered for subject '{subject}', length '{word_length}'. Candidates: {candidate_words}")
-            # Fallback
-            word = get_fallback_word(word_length, subject)
-            self._add_recent_word(word, subject)
-            return word
+            with open(hints_file, 'r', encoding='utf-8') as f:
+                hints_data = json.load(f)
+            templates = hints_data.get('templates', {})
+            if subject not in templates:
+                subject = 'general'
+            all_words = list(templates.get(subject, {}).keys())
         except Exception as e:
-            logger.error(f"Error selecting word from dictionary: {e}")
-            word = get_fallback_word(word_length, subject)
-            self._add_recent_word(word, subject)
-            return word
+            logger.error(f"Error loading hints.json: {e}")
+            all_words = []
+        # Exclude recently used words for this user
+        recent = set(self.get_recently_used_words(username))
+        candidates = [w for w in all_words if w not in recent]
+        if not candidates:
+            candidates = all_words  # If all words used, allow repeats
+        if not candidates:
+            logger.error(f"No candidate words available for subject '{subject}'")
+            return None
+        word = random.choice(candidates)
+        self._add_recent_word(word, username)
+        logger.info(f"[DEBUG] Selected fallback word: {word}")
+        return word
 
     def __init__(self):
         """Initialize the word selector."""
@@ -2021,17 +2018,9 @@ class WordSelector:
         if not self.api_key:
             logger.info("No valid API key found. Using fallback mode.")
             self.use_fallback = True
-            
-        # Load words from JSON
-        try:
-            with open("backend/data/words.json", "r", encoding="utf-8") as f:
-                self.words_data = json.load(f)
-            logger.info("Successfully loaded words from words.json")
-        except Exception as e:
-            logger.error(f"Failed to load words.json: {e}")
-            self.words_data = {}
-            self.use_fallback = True
         
+        # Remove all words.json loading
+        # self.words_data = {}
         # Set up headers according to OpenRouter requirements
         self.headers = {
             "Authorization": f"Bearer {self.api_key}" if self.api_key else "",
@@ -2052,7 +2041,7 @@ class WordSelector:
         
         # Track recently used words
         self._recently_used_words = set()
-        self._max_recent_words = 25  # Maximum number of words to remember
+        self._max_recent_words = int(os.getenv("RECENT_WORDS_LIMIT", "50"))  # Set by .env or default to 50
 
         # Email configuration
         self.admin_email = os.getenv("ADMIN_EMAIL")
@@ -2060,6 +2049,10 @@ class WordSelector:
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER")
         self.smtp_pass = os.getenv("SMTP_PASS")
+
+        # Track recently used words per user
+        self._recently_used_words_by_user = {}
+        self._max_recent_words = int(os.getenv("RECENT_WORDS_LIMIT", "50"))  # Set by .env or default to 50
 
     def _validate_api_key(self) -> bool:
         """Validate the API key format."""
@@ -2071,148 +2064,6 @@ class WordSelector:
             return len(parts) >= 3 and parts[0] == 'sk' and parts[1] == 'or'
         except:
             return False
-
-    def get_recently_used_words(self) -> list:
-        """Get the list of recently used words."""
-        return list(self._recently_used_words)
-
-    def clear_recent_words(self):
-        """Clear the list of recently used words."""
-        self._recently_used_words.clear()
-        logger.info("Cleared recently used words list")
-
-    def _send_email_alert(self, subject: str, body: str) -> None:
-        """Send email alert to admin."""
-        if not all([self.admin_email, self.smtp_user, self.smtp_pass]):
-            logger.warning("Email configuration incomplete. Skipping email alert.")
-            return
-            
-        try:
-            msg = MIMEText(body)
-            msg['Subject'] = subject
-            msg['From'] = self.smtp_user
-            msg['To'] = self.admin_email
-            
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_pass)
-                server.send_message(msg)
-                
-            logger.info(f"Rate limit warning email sent to {self.admin_email}")
-        except Exception as e:
-            logger.error(f"Failed to send email alert: {e}")
-
-    def make_api_request(self, messages: List[Dict], model: Optional[str] = None) -> Dict:
-        """Make a request to the OpenRouter API."""
-        if not self.api_key:
-            logger.error("API key is missing")
-            raise ValueError("API key not set")
-
-        # Log API key format (first 8 chars and last 4)
-        key_preview = f"{self.api_key[:8]}...{self.api_key[-4:]}" if self.api_key else "None"
-        logger.info(f"Using API key: {key_preview}")
-
-        # Ensure messages is a list of dictionaries
-        if not isinstance(messages, list):
-            messages = [messages]
-
-        data = {
-            "model": model or self.models[0],  # Use first model by default
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 50,
-            "top_p": 0.95,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "stream": False
-        }
-
-        try:
-            logger.info(f"Making API request to {self.base_url}")
-            logger.info(f"Using model: {model or self.models[0]}")
-            logger.debug(f"Request headers: {self.headers}")
-            logger.debug(f"Request data: {json.dumps(data)}")
-
-            response = requests.post(
-                self.base_url,
-                headers=self.headers,
-                json=data,
-                timeout=10
-            )
-            
-            logger.info(f"Response status code: {response.status_code}")
-            
-            if response.status_code == 401:
-                error_msg = f"Authentication failed: {response.text}"
-                logger.error(error_msg)
-                logger.error("API Response Headers:")
-                for header, value in response.headers.items():
-                    logger.error(f"  {header}: {value}")
-                if "x-clerk-auth-message" in response.headers:
-                    logger.error(f"Auth Message: {response.headers['x-clerk-auth-message']}")
-                raise requests.exceptions.RequestException(error_msg)
-            
-            response.raise_for_status()
-            response_data = response.json()
-            
-            # Check for rate limit headers
-            remaining = response.headers.get('x-ratelimit-remaining')
-            reset = response.headers.get('x-ratelimit-reset')
-            if remaining and reset:
-                logger.info(f"Rate limit - Remaining: {remaining}, Reset: {reset}")
-                
-            return response_data
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Error response: {e.response.text}")
-            raise
-
-    def _build_prompt(self, word_length: int, subject: str) -> dict:
-        """Build the prompt for word selection with strict JSON formatting."""
-        return {
-            "messages": [
-                {
-                    "role": "system",
-                    "content": 'You are a word guessing game assistant. You MUST respond with ONLY a JSON object using double quotes, in this exact format: {"selected_word": "WORD"}'
-                },
-                {
-                    "role": "user",
-                    "content": f'Choose a {word_length}-letter English word under the subject "{subject}". Respond with ONLY the JSON object using double quotes.'
-                }
-            ]
-        }
-
-    def _make_api_request_with_retry(self, messages: List[Dict], retry_count: int = 0) -> Dict:
-        """Make API request with retry logic and model fallback."""
-        if self.use_fallback:
-            logger.info("Using fallback mode (API key not set)")
-            raise ValueError("API key not set. Using fallback mode.")
-
-        # Try each model in sequence
-        for model in self.models[retry_count:]:
-            try:
-                logger.info(f"Attempting request with model: {model} (Attempt {retry_count + 1}/{self.max_retries})")
-                return self.make_api_request(messages, model)
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Model {model} failed: {str(e)}")
-                if "401" in str(e):
-                    logger.error("Authentication error detected - check API key configuration")
-                continue
-
-        # If we've tried all models and still failed
-        if retry_count >= self.max_retries - 1:
-            logger.error("All models failed and max retries reached")
-            raise requests.exceptions.RequestException("All models failed and max retries reached")
-
-        # Calculate backoff time with jitter
-        backoff = self.initial_backoff * (2 ** retry_count) * (0.5 + random.random())
-        logger.warning(f"API request failed. Retrying in {backoff:.2f} seconds... (Attempt {retry_count + 1}/{self.max_retries})")
-        time.sleep(backoff)
-
-        # Retry with the next set of models
-        return self._make_api_request_with_retry(messages, retry_count + 1)
 
     def generate_all_hints(self, word: str, subject: str) -> List[str]:
         """Generate up to 10 hints for a word based on difficulty level."""

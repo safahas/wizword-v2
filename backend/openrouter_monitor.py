@@ -1,10 +1,12 @@
+import os
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# LOG_LEVEL can be set in your .env file to control logging verbosity (e.g., LOG_LEVEL=WARNING)
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 logger = logging.getLogger(__name__)
 
 class QuotaMonitor:

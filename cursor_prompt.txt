@@ -47,7 +47,7 @@ word_guess_contest_ai/
   - Animals, Food, Places, Science, History, Tech, Movies, Music, Brands, Random
 - Mode toggle:
   - Fun Mode (no penalty)
-  - Challenge Mode (10 pts per failed question/guess)
+  - Wiz Mode (10 pts per failed question/guess)
 - Nickname entry (optional)
 - Submit question + submit final guess
 - Scoreboard and gameplay history
@@ -56,7 +56,7 @@ word_guess_contest_ai/
   - Score, questions count, guesses
   - Time taken
   - Download/share game card
-  - “Play Again” button
+  - "Play Again" button
 
 ---
 
@@ -74,7 +74,7 @@ Gemini API call (via OpenRouter)
 
 Manage score:
 
-+10 for failed question/guess (Challenge Mode only)
++10 for failed question/guess (Wiz Mode only)
 
 Validate yes/no questions vs final guess
 

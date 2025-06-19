@@ -8,4 +8,5 @@ cryptography>=42.0.0  # For word encryption
 qrcode>=7.4.2  # For generating QR codes for share cards
 pandas>=2.2.0  # For data analysis and statistics
 matplotlib>=3.8.0  # For generating graphs
-seaborn>=0.13.0  # For statistical visualizations 
+seaborn>=0.13.0  # For statistical visualizations
+bcrypt 

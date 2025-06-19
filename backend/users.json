@@ -1,0 +1,17 @@
+[
+  {
+    "email": "safahas@gmail.com",
+    "username": "safahas",
+    "password_hash": "$2b$12$bTRIGzq5QpQVs8Izq.Lp5eF.jFrVg7W6RcpEMsH7axnEnpepLm8rC"
+  },
+  {
+    "email": "sadokhasan@gmail.com",
+    "username": "Sadok",
+    "password_hash": "$2b$12$zRKwRA/3QVeXlIE5rv5XF.Dj.IzXP.ECOF0fgZYY2BVCKC8ouLGhe"
+  },
+  {
+    "email": "Sadokhasan@gmail.com",
+    "username": "Sadokh",
+    "password_hash": "$2b$12$FCPb1mfOdN5ShzgvtVQX3OJT9sn8KU8A2ETkB5.fR/NixKthicHGK"
+  }
+]
