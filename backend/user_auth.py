@@ -2,8 +2,18 @@ import json
 import os
 import bcrypt
 from typing import Optional
+import secrets
+import hashlib
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Force load .env from absolute path
+load_dotenv(dotenv_path="C:/Users/CICD Student/cursor ai agent/game_guess/.env")
 
 USERS_FILE = os.path.join(os.path.dirname(__file__), 'users.json')
+TEMP_PASSWORDS_FILE = os.path.join(os.path.dirname(__file__), 'temp_passwords.json')
 
 # Helper to load all users
 def load_all_users():
@@ -16,6 +26,18 @@ def load_all_users():
 def save_all_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, indent=2)
+
+# Helper to load temp passwords
+def load_temp_passwords():
+    if not os.path.exists(TEMP_PASSWORDS_FILE):
+        return {}
+    with open(TEMP_PASSWORDS_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+# Helper to save temp passwords
+def save_temp_passwords(temp_passwords):
+    with open(TEMP_PASSWORDS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(temp_passwords, f, indent=2)
 
 # Register a new user
 def register_user(email: str, username: str, password: str) -> Optional[str]:
@@ -54,4 +76,71 @@ def load_user_profile(email: str) -> Optional[dict]:
     for user in users:
         if user['email'] == email:
             return user
-    return None 
+    return None
+
+# Generate and store a temporary password for a user
+def set_temp_password(email: str) -> Optional[str]:
+    users = load_all_users()
+    user = next((u for u in users if u['email'] == email.strip().lower()), None)
+    if not user:
+        return None
+    temp_password = secrets.token_urlsafe(8)
+    temp_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
+    expiry = (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+    temp_passwords = load_temp_passwords()
+    temp_passwords[email] = {'hash': temp_hash, 'expires': expiry}
+    save_temp_passwords(temp_passwords)
+    return temp_password
+
+# Validate a temporary password
+def validate_temp_password(email: str, temp_password: str) -> bool:
+    temp_passwords = load_temp_passwords()
+    entry = temp_passwords.get(email)
+    if not entry:
+        return False
+    if datetime.utcnow() > datetime.fromisoformat(entry['expires']):
+        # Expired
+        del temp_passwords[email]
+        save_temp_passwords(temp_passwords)
+        return False
+    if bcrypt.checkpw(temp_password.encode(), entry['hash'].encode()):
+        # Valid, clear after use
+        del temp_passwords[email]
+        save_temp_passwords(temp_passwords)
+        return True
+    return False
+
+# Send temporary password via email
+def send_temp_password_email(email: str, temp_password: str) -> bool:
+    # SMTP config from environment
+    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+    smtp_port = int(os.getenv('SMTP_PORT', '587'))
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_pass = os.getenv('SMTP_PASS')
+    from_addr = smtp_user
+    to_addr = email
+    subject = 'Your WizWord Temporary Password'
+    body = f"Your temporary password is: {temp_password}\n\nIt will expire in 5 minutes. Please use it to log in and reset your password immediately."
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = from_addr
+    msg['To'] = to_addr
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_addr, [to_addr], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"Failed to send temp password email: {e}")
+        return False
+
+# API: Forgot password handler
+def forgot_password(email: str) -> Optional[str]:
+    temp_password = set_temp_password(email)
+    if not temp_password:
+        return None
+    if send_temp_password_email(email, temp_password):
+        return 'Temporary password sent to your email.'
+    else:
+        return 'Failed to send email. Please try again later.' 

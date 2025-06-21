@@ -1,3 +1,9 @@
+from dotenv import load_dotenv
+import os
+
+# Always use the absolute path to your .env
+load_dotenv(dotenv_path="C:/Users/CICD Student/cursor ai agent/game_guess/.env")
+
 import streamlit as st
 # Configure Streamlit page with custom theme
 st.set_page_config(
@@ -565,6 +571,48 @@ def main():
                     st.session_state.login_error = "Invalid email or password."
             if st.session_state.login_error:
                 st.error(st.session_state.login_error)
+            # Forgot password flow
+            if st.button("Forgot Password?"):
+                st.session_state.show_forgot_pw = True
+            if st.session_state.get("show_forgot_pw"):
+                st.info("Enter your email to receive a temporary password.")
+                forgot_email = st.text_input("Email for password reset", key="forgot_email")
+                if st.button("Send Temporary Password"):
+                    from backend.user_auth import forgot_password
+                    result = forgot_password(forgot_email)
+                    if result:
+                        st.success(result)
+                        st.session_state.show_forgot_pw = False
+                        st.session_state.show_temp_pw_login = True
+                        st.session_state.temp_pw_email = forgot_email
+                    else:
+                        st.error("No account found or failed to send email.")
+            # Temp password login flow
+            if st.session_state.get("show_temp_pw_login"):
+                st.info("Enter the temporary password sent to your email and set a new password.")
+                temp_pw = st.text_input("Temporary Password", key="temp_pw")
+                new_pw = st.text_input("New Password", type="password", key="new_pw")
+                new_pw2 = st.text_input("Confirm New Password", type="password", key="new_pw2")
+                if st.button("Reset Password"):
+                    from backend.user_auth import validate_temp_password, load_all_users, save_all_users
+                    email = st.session_state.get("temp_pw_email")
+                    if not email:
+                        st.error("Session error. Please try again.")
+                    elif not validate_temp_password(email, temp_pw):
+                        st.error("Invalid or expired temporary password.")
+                    elif new_pw != new_pw2:
+                        st.error("Passwords do not match.")
+                    elif len(new_pw) < 6:
+                        st.error("Password must be at least 6 characters.")
+                    else:
+                        users = load_all_users()
+                        for user in users:
+                            if user['email'] == email:
+                                import bcrypt
+                                user['password_hash'] = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
+                        save_all_users(users)
+                        st.success("Password reset successful! Please log in.")
+                        st.session_state.show_temp_pw_login = False
         with tabs[1]:
             st.subheader("Create a new account")
             reg_email = st.text_input("Email", key="reg_email")

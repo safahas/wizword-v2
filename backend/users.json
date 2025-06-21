@@ -13,5 +13,10 @@
     "email": "Sadokhasan@gmail.com",
     "username": "Sadokh",
     "password_hash": "$2b$12$FCPb1mfOdN5ShzgvtVQX3OJT9sn8KU8A2ETkB5.fR/NixKthicHGK"
+  },
+  {
+    "email": "safahas@hotmail.com",
+    "username": "safahot",
+    "password_hash": "$2b$12$LiSG9YdWktzKCL4ovzgEsuvFIXjlE3mvc6KsYD/iJ/ZKGUmvch0Oi"
   }
 ]

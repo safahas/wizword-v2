@@ -42,6 +42,12 @@ AWS_REGION=your_aws_region  # e.g., us-east-1
 
 # Game Configuration
 USE_CLOUD_STORAGE=false  # Set to true to use AWS DynamoDB instead of local storage
+
+# SMTP Configuration (for password reset and email alerts)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_gmail_app_password  # Use a 16-character Google App Password (no spaces)
 ```
 
 5. Run the game:
@@ -75,6 +81,14 @@ streamlit run streamlit_app.py
    - Higher scores are better!
    - Be strategic with your questions to minimize penalties
 
+   ### Beat Mode
+   - **Time-based challenge:** You have a limited amount of time to guess the word.
+   - The timer starts as soon as the game begins.
+   - Each question and guess consumes time.
+   - The faster you solve the word, the higher your score.
+   - If time runs out, the game ends automatically.
+   - Designed for speed and quick thinking—perfect for competitive play or practicing under pressure!
+
 3. Asking Questions:
    - Questions must be yes/no format (start with Is, Are, Does, etc.)
    - Questions must end with a question mark
@@ -91,6 +105,21 @@ streamlit run streamlit_app.py
      - Wrong guesses cost 10 points
      - Correct guesses earn points based on word length and questions asked
      - Try to minimize questions to maximize your score!
+
+## Forgot Password / Password Reset
+
+If you forget your password, you can reset it directly from the login screen:
+
+1. Click the **"Forgot Password?"** button on the login tab.
+2. Enter your registered email address and click **"Send Temporary Password"**.
+3. Check your email for a temporary password (valid for 5 minutes).
+4. Enter the temporary password and set a new password in the UI.
+5. Log in with your new password.
+
+**Note:**
+- The app uses your SMTP settings from `.env` to send password reset emails.
+- For Gmail, you must use a [Google App Password](https://support.google.com/accounts/answer/185833?hl=en) (remove spaces when copying to `.env`).
+- If you use another provider, update `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` accordingly.
 
 ## Cloud Deployment
 
