@@ -192,14 +192,14 @@ class GameStats:
         """Get statistics for daily challenges."""
         today = datetime.now().strftime("%Y-%m-%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        user_stats = self.stats.get(self.nickname, self._empty_user_stats())
+        
         return {
-            "today": user_stats["daily_stats"].get(today, {
+            "today": self.stats["daily_stats"].get(today, {
                 "games_played": 0,
                 "total_score": 0,
                 "avg_time": 0
             }),
-            "yesterday": user_stats["daily_stats"].get(yesterday, {
+            "yesterday": self.stats["daily_stats"].get(yesterday, {
                 "games_played": 0,
                 "total_score": 0,
                 "avg_time": 0
