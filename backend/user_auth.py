@@ -6,6 +6,9 @@ import secrets
 import hashlib
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -143,4 +146,37 @@ def forgot_password(email: str) -> Optional[str]:
     if send_temp_password_email(email, temp_password):
         return 'Temporary password sent to your email.'
     else:
-        return 'Failed to send email. Please try again later.' 
+        return 'Failed to send email. Please try again later.'
+
+# Send share card image as email attachment
+def send_share_card_email(email: str, subject: str, body: str, image_path: str) -> bool:
+    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+    smtp_port = int(os.getenv('SMTP_PORT', '587'))
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_pass = os.getenv('SMTP_PASS')
+    from_addr = smtp_user
+    to_addr = email
+    msg = MIMEMultipart()
+    msg['From'] = from_addr
+    msg['To'] = to_addr
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    # Attach image
+    try:
+        with open(image_path, 'rb') as f:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="{os.path.basename(image_path)}"')
+        msg.attach(part)
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            response = server.sendmail(from_addr, [to_addr], msg.as_string())
+            print(f"[DEBUG] SMTP sendmail response: {response}")
+        return True
+    except Exception as e:
+        import traceback
+        print(f"Failed to send share card email: {e}")
+        traceback.print_exc()
+        return False 

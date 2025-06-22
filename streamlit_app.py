@@ -1507,6 +1507,7 @@ def display_game_over(game_summary):
                     game_summary_for_card["score"] = st.session_state.get('beat_score', 0)
                 share_card_path = create_share_card(game_summary_for_card)
                 if share_card_path:
+                    st.session_state['share_card_path'] = share_card_path
                     st.image(share_card_path, caption="Your Share Card")
                     st.download_button(
                         "Download Share Card",
@@ -1514,6 +1515,37 @@ def display_game_over(game_summary):
                         file_name="word_guess_share.png",
                         mime="image/png"
                     )
+        # --- New: Send by Email ---
+        if st.session_state.get('share_card_path') and st.session_state.get('user') and st.session_state.user.get('email'):
+            unique_id = f"{mode}_{game_summary.get('word','')}"
+            share_text = share_utils.generate_share_text(game_summary)
+            share_url = share_utils.generate_share_url(game_summary)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                if st.button("Share on Twitter", key=f"share_twitter_btn_sharetab_{unique_id}"):
+                    twitter_url = f"https://twitter.com/intent/tweet?text={share_text}&url={share_url}"
+                    st.markdown(f"[Click to Tweet]({twitter_url})")
+            with col2:
+                if st.button("Share on Facebook", key=f"share_facebook_btn_sharetab_{unique_id}"):
+                    fb_url = f"https://www.facebook.com/sharer/sharer.php?u={share_url}"
+                    st.markdown(f"[Share on Facebook]({fb_url})")
+            with col3:
+                if st.button("Copy Link", key=f"share_copy_btn_sharetab_{unique_id}"):
+                    st.code(share_url)
+                    st.success("Link copied to clipboard!")
+            with col4:
+                email_to = st.session_state.user['email']
+                email_subject = "Your WizWord Share Card"
+                email_body = "Congratulations! Here is your WizWord share card."
+                if st.button("Send Share Card by Email", key=f"share_email_btn_sharetab_{unique_id}"):
+                    from backend.user_auth import send_share_card_email
+                    print(f"[DEBUG] Attempting to send share card to {email_to} with path {st.session_state['share_card_path']}")
+                    with st.spinner("Sending email..."):
+                        sent = send_share_card_email(email_to, email_subject, email_body, st.session_state['share_card_path'])
+                        if sent:
+                            st.success(f"Share card sent to {email_to}!")
+                        else:
+                            st.error("Failed to send share card by email. Please try again later.")
         # --- NEW: Generate and display highest score share card for this month ---
         from backend.share_card import create_monthly_high_score_share_card
         stats_manager = None
@@ -1523,6 +1555,7 @@ def display_game_over(game_summary):
             with st.spinner("Generating monthly high score share card..."):
                 high_score_card_path = create_monthly_high_score_share_card(stats_manager)
                 if high_score_card_path:
+                    st.session_state['monthly_high_score_card_path'] = high_score_card_path
                     st.image(high_score_card_path, caption="Your Highest Score This Month")
                     st.download_button(
                         "Download Monthly High Score Card",
@@ -1532,6 +1565,20 @@ def display_game_over(game_summary):
                     )
                 else:
                     st.info("No high score card available for this month.")
+        # --- Always show email button if card exists ---
+        if st.session_state.get('monthly_high_score_card_path') and st.session_state.get('user') and st.session_state.user.get('email'):
+            email_to = st.session_state.user['email']
+            email_subject = "Your WizWord Monthly High Score Card"
+            email_body = "Congratulations! Here is your WizWord monthly high score card."
+            if st.button("Send Monthly High Score Card by Email", key=f"share_email_btn_monthly_{email_to}"):
+                from backend.user_auth import send_share_card_email
+                print(f"[DEBUG] Attempting to send monthly high score card to {email_to} with path {st.session_state['monthly_high_score_card_path']}")
+                with st.spinner("Sending email..."):
+                    sent = send_share_card_email(email_to, email_subject, email_body, st.session_state['monthly_high_score_card_path'])
+                    if sent:
+                        st.success(f"Monthly high score card sent to {email_to}!")
+                    else:
+                        st.error("Failed to send monthly high score card by email. Please try again later.")
         
         # Share buttons
         share_text = share_utils.generate_share_text(game_summary)
@@ -1539,15 +1586,15 @@ def display_game_over(game_summary):
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("Share on Twitter"):
+            if st.button("Share on Twitter", key="share_twitter_btn_sharetab"):
                 twitter_url = f"https://twitter.com/intent/tweet?text={share_text}&url={share_url}"
                 st.markdown(f"[Click to Tweet]({twitter_url})")
         with col2:
-            if st.button("Share on Facebook"):
+            if st.button("Share on Facebook", key="share_facebook_btn_sharetab"):
                 fb_url = f"https://www.facebook.com/sharer/sharer.php?u={share_url}"
                 st.markdown(f"[Share on Facebook]({fb_url})")
         with col3:
-            if st.button("Copy Link"):
+            if st.button("Copy Link", key="share_copy_btn_sharetab"):
                 st.code(share_url)
                 st.success("Link copied to clipboard!")
     
@@ -1565,7 +1612,7 @@ def display_game_over(game_summary):
                 st.session_state.beat_time_left = BEAT_MODE_TIMEOUT_MINUTES * 60
                 st.session_state.beat_start_time = time.time()
                 st.session_state.game = GameLogic(
-                    word_length=prev_game.word_length,
+                    word_length=len(prev_game.selected_word),
                     subject=prev_game.subject,
                     mode=prev_game.mode,
                     nickname=prev_game.nickname,

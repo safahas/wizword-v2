@@ -328,7 +328,8 @@ class ShareCardGenerator:
         nickname: Optional[str] = None,
         player_stats: Optional[Dict] = None,
         difficulty: Optional[str] = None,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        is_monthly: bool = False
     ) -> str:
         """
         Generate a share card image with game results and statistics.
@@ -343,6 +344,7 @@ class ShareCardGenerator:
             player_stats: Optional player statistics
             difficulty: Optional difficulty
             output_path: Optional custom output path
+            is_monthly: Flag indicating if the card is for a monthly high score
             
         Returns:
             Path to the generated image
@@ -395,13 +397,22 @@ class ShareCardGenerator:
             
             # Draw word and category
             word_y = subtitle_y + 40
-            draw.text(
-                (self.width//2, word_y),
-                f"Word: {word.upper()}",
-                font=fonts['subtitle'],
-                fill=self.colors['text'],
-                anchor="mm"
-            )
+            if is_monthly:
+                draw.text(
+                    (self.width//2, word_y),
+                    "Your Highest Score for this Month",
+                    font=fonts['subtitle'],
+                    fill=self.colors['text'],
+                    anchor="mm"
+                )
+            else:
+                draw.text(
+                    (self.width//2, word_y),
+                    f"Word: {word.upper()}",
+                    font=fonts['subtitle'],
+                    fill=self.colors['text'],
+                    anchor="mm"
+                )
             draw.text(
                 (self.width//2, word_y + 50),
                 f"Category: {category}",
@@ -530,12 +541,13 @@ class ShareCardGenerator:
             logger.error(f"Failed to generate share card: {e}")
             return ""
 
-def create_share_card(game_summary: Dict) -> str:
+def create_share_card(game_summary: Dict, is_monthly: bool = False) -> str:
     """
     Create a share card from a game summary.
     
     Args:
         game_summary: Dictionary containing game results
+        is_monthly: Flag indicating if the card is for a monthly high score
         
     Returns:
         Path to the generated share card image
@@ -549,7 +561,9 @@ def create_share_card(game_summary: Dict) -> str:
         mode=game_summary["mode"],
         nickname=game_summary.get("nickname"),
         player_stats=game_summary.get("player_stats"),
-        difficulty=game_summary.get("difficulty")
+        difficulty=game_summary.get("difficulty"),
+        output_path=game_summary.get("output_path"),
+        is_monthly=is_monthly
     ) 
 
 def create_monthly_high_score_share_card(stats_manager) -> str:
@@ -562,6 +576,12 @@ def create_monthly_high_score_share_card(stats_manager) -> str:
     word = high_score_game["word"].lower()
     nickname = high_score_game.get("nickname", "user")
     output_path = os.path.join('game_data/share_cards', f'share_card_{nickname}_{word}_monthly.png')
+    # Fix duration for Beat mode
+    mode = high_score_game.get("mode", "")
+    if mode == "Beat":
+        beat_mode_time = int(os.getenv("BEAT_MODE_TIME", 300))
+        high_score_game["duration"] = beat_mode_time
+        high_score_game["time_taken"] = beat_mode_time
     # Check if file exists and is less than 1 hour old
     if os.path.exists(output_path):
         mtime = os.path.getmtime(output_path)
@@ -569,4 +589,4 @@ def create_monthly_high_score_share_card(stats_manager) -> str:
             logger.info(f"Returning cached share card: {output_path}")
             return output_path
     # Regenerate share card
-    return create_share_card({**high_score_game, "output_path": output_path}) 
+    return create_share_card({**high_score_game, "output_path": output_path}, is_monthly=True) 
