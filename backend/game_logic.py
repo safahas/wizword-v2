@@ -41,7 +41,9 @@ class GameLogic:
         self.guesses_made = 0
         self.show_word_penalty_applied = False
         try:
-            self.selected_word = get_fallback_word(None, subject)
+            # Instead of selecting a word without username, always use nickname for recent word tracking
+            username = self.nickname if self.nickname else "global"
+            self.selected_word = self.word_selector.select_word(word_length, subject, username=username)
             if not self.selected_word:
                 raise ValueError("Failed to select a word")
             all_hints = []
@@ -67,6 +69,8 @@ class GameLogic:
             if not all_hints:
                 all_hints = self.word_selector.generate_all_hints(self.selected_word, subject)
             logger.info(f"Generated {len(all_hints)} total hints for word '{self.selected_word}'")
+            # Deduplicate all_hints
+            all_hints = list(dict.fromkeys(all_hints))
             static_hints = []
             dynamic_hints = []
             for hint in all_hints:

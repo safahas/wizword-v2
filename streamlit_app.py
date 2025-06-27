@@ -31,6 +31,7 @@ from backend.session_manager import SessionManager
 from backend.share_card import create_share_card
 from backend.share_utils import ShareUtils
 from backend.user_auth import register_user, login_user, load_user_profile
+import requests
 
 
 
@@ -550,6 +551,7 @@ def main():
         st.session_state.register_error = ""
     # If not logged in, show login/register UI
     if not st.session_state.user:
+        # Show original WizWord banner using .game-title class (no score message)
         st.markdown("<div class='game-title'>WizWord</div>", unsafe_allow_html=True)
         st.markdown("""
         <div style='text-align:center; margin-top:-18px; margin-bottom:18px;'>
@@ -664,9 +666,105 @@ def display_welcome():
     """Display the welcome screen and game setup."""
     if st.session_state.get('game'):
         return  # Defensive: never show settings if a game is active
-    # Show welcome message if user is logged in
-    if st.session_state.get('user'):
-        st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><b>Welcome, {st.session_state.user['username']}!</b></div>", unsafe_allow_html=True)
+    if not st.session_state.get('user'):
+        # Show WizWord banner with only the title (no high score message)
+        st.markdown("""
+        <div class='wizword-banner'>
+          <div class='wizword-banner-title'>WizWord</div>
+        </div>
+        <style>
+        .wizword-banner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(90deg, #4ECDC4 0%, #FFD93D 100%);
+            color: #222;
+            padding: 14px 10px 10px 10px;
+            margin-bottom: 18px;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            font-weight: 700;
+        }
+        .wizword-banner-title {
+            font-family: 'Baloo 2', 'Poppins', 'Arial Black', Arial, sans-serif !important;
+            font-size: 2em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-bottom: 4px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        return
+    # If logged in, show welcome and high score
+    st.markdown(f"<div style='text-align:center; margin-bottom:10px;'><b>Welcome, {st.session_state.user['username']}!</b></div>", unsafe_allow_html=True)
+    session_manager = SessionManager()
+    result = session_manager.get_global_high_score_current_month()
+    if result and result.get('nickname'):
+        high_score_html = f"""
+            <div class='wizword-banner'>
+              <div class='wizword-banner-global-score'>
+                🌍 Global Highest Score ({result['mode']}, {result['subject'].title()}, This Month): <span style='color:#FF6B6B;'>{result['score']}</span> by <span style='color:#222;'>{result['nickname']}</span>
+              </div>
+            </div>
+            <style>
+            .wizword-banner {{
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(90deg, #4ECDC4 0%, #FFD93D 100%);
+                color: #222;
+                padding: 8px 10px;
+                margin-bottom: 14px;
+                border-radius: 14px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                font-weight: 700;
+            }}
+            .wizword-banner-global-score {{
+                font-size: 1em;
+                margin-top: 2px;
+                font-weight: 700;
+                text-align: center;
+                white-space: normal;
+            }}
+            </style>
+        """
+    else:
+        high_score_html = """
+            <div class='wizword-banner'>
+              <div class='wizword-banner-global-score'>
+                🌍 No global scores found for this month.
+              </div>
+            </div>
+            <style>
+            .wizword-banner {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(90deg, #4ECDC4 0%, #FFD93D 100%);
+                color: #222;
+                padding: 8px 10px;
+                margin-bottom: 14px;
+                border-radius: 14px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                font-weight: 700;
+            }
+            .wizword-banner-global-score {
+                font-size: 1em;
+                margin-top: 2px;
+                font-weight: 700;
+                text-align: center;
+                white-space: normal;
+            }
+            </style>
+        """
+    st.markdown(high_score_html, unsafe_allow_html=True)
+    # --- End WizWord Banner with Global High Score ---
+    if st.session_state.get('game'):
+        return  # Defensive: never show settings if a game is active
+    # Remove the second welcome message here
     st.markdown("<div class='game-title'>WizWord</div>", unsafe_allow_html=True)
     st.markdown("""
     <div style='text-align:center; margin-top:-18px; margin-bottom:18px;'>
@@ -793,6 +891,11 @@ def display_game():
     user_name = st.session_state.user['username'] if st.session_state.get('user') else ''
 
     max_hints = game.current_settings["max_hints"]
+
+    # --- REMOVE Global Highest Score Banner from running page ---
+    # (Banner code removed)
+    st.markdown("---")
+    # --- END Global Highest Score Banner ---
 
     # --- BEAT MODE: Defensive initialization before any use ---
     if getattr(game, "mode", None) == "Beat":
@@ -935,6 +1038,8 @@ def display_game():
                             # In Fun mode, trigger game over and set just_finished_game flag
                             st.session_state.game_over = True
                             st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
+                            # Save completed game for global high score
+                            SessionManager().save_game(st.session_state.game_summary)
                             st.session_state.just_finished_game = True
                             st.rerun()
                     else:
@@ -943,23 +1048,7 @@ def display_game():
             # (Skip and Exit buttons removed from left_col)
         with right_col:
             with st.container():
-                hints_remaining = max_hints - len(game.hints_given)
-                hint_display = st.empty()
-                if st.button(f"💡 Get Hint ({hints_remaining}/{max_hints})", 
-                            disabled=len(game.hints_given) >= max_hints,
-                            use_container_width=True,
-                            key=f"beat_hint_button_{st.session_state.beat_word_count}"):
-                    hint, points = game.get_hint()
-                    st.session_state.beat_score = game.score  # Use GameLogic's score
-                    if points != 0:
-                        st.warning(f"{points:+.1f} points", icon="⚠️")
-                    if hint in ["Game is already over!", f"Maximum hints ({max_hints}) reached!"]:
-                        st.warning(hint)
-                    else:
-                        st.session_state.last_beat_hint = hint
-                # Always display the last hint if available
-                if hasattr(st.session_state, 'last_beat_hint') and st.session_state.last_beat_hint:
-                    hint_display.markdown(f'<div data-testid="hint-text">💡 Hint: {st.session_state.last_beat_hint}</div>', unsafe_allow_html=True)
+                display_hint_section(game)
             # Move Show Word button below question field
             is_fallback = game.word_selector.use_fallback
             if is_fallback:
@@ -1067,12 +1156,22 @@ def display_game():
             if not st.session_state.get('game_over', False):
                 st.session_state.game_over = True
                 st.session_state.game_summary = game.get_game_summary()
+                st.session_state.game_summary['game_over'] = True  # Ensure game_over is set
+                # Save completed game for global high score (Beat mode timeout)
+                SessionManager().save_game(st.session_state.game_summary)
                 st.session_state.beat_time_left = 0
                 st.session_state.beat_timer_expired = True
                 st.rerun()
             else:
                 st.info('⏰ Time is up! Game over.')
             return
+        # --- Ensure Beat mode game is saved when game_over is set by any means ---
+        if st.session_state.get('game_over', False) and st.session_state.get('game_summary'):
+            st.session_state.game_summary['game_over'] = True  # Ensure game_over is set
+            # Save completed game for global high score (Beat mode manual/other end)
+            SessionManager().save_game(st.session_state.game_summary)
+            st.session_state.just_finished_game = True
+            st.rerun()
         import time as _time
         _time.sleep(1)
         st.rerun()
@@ -1202,6 +1301,8 @@ def display_game():
                         # In Fun mode, trigger game over and set just_finished_game flag
                         st.session_state.game_over = True
                         st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
+                        # Save completed game for global high score
+                        SessionManager().save_game(st.session_state.game_summary)
                         st.session_state.just_finished_game = True
                         st.rerun()
                 else:
@@ -1213,22 +1314,7 @@ def display_game():
     with right_col:
         # Hint section with combined button
         with st.container():
-            hints_remaining = max_hints - len(game.hints_given)
-            hint_display = st.empty()
-            if st.button(f"💡 Get Hint ({hints_remaining}/{max_hints})", 
-                        disabled=len(game.hints_given) >= max_hints,
-                        use_container_width=True,
-                        key="hint-button"):
-                hint, points = game.get_hint()
-                if points != 0:
-                    st.warning(f"{points:+.1f} points", icon="⚠️")
-                if hint in ["Game is already over!", f"Maximum hints ({max_hints}) reached!"]:
-                    st.warning(hint)
-                else:
-                    st.session_state.last_beat_hint = hint
-            # Always display the last hint if available
-            if hasattr(st.session_state, 'last_beat_hint') and st.session_state.last_beat_hint:
-                hint_display.markdown(f'<div data-testid="hint-text">💡 Hint: {st.session_state.last_beat_hint}</div>', unsafe_allow_html=True)
+            display_hint_section(game)
         # Question input - directly in the interface
         is_fallback = game.word_selector.use_fallback
         if is_fallback:
@@ -1705,6 +1791,12 @@ def display_hint_section(game):
             if points < 0:
                 st.warning(f"Got hint but lost {abs(points)} points!")
             st.info(f"Hint: {hint}")
+        # --- Previous Hints Button ---
+        if st.button("Previous Hints", key="prev-hints-btn"):
+            if game.hints_given:
+                st.info("\n".join([f"{i+1}. {h}" for i, h in enumerate(game.hints_given)]), icon="💡")
+            else:
+                st.info("No previous hints yet.", icon="💡")
     
     with col2:
         st.metric("Hints Left", hints_remaining)  # Use calculated hints remaining

@@ -2159,8 +2159,8 @@ class WordSelector:
         logger.info(f"[HINT SOURCE] Final hint count: {len(hints)}")
         return hints
 
-    def select_word(self, word_length: int = 5, subject: str = "general") -> str:
-        """Select a word based on length and subject."""
+    def select_word(self, word_length: int = 5, subject: str = "general", username: str = "global") -> str:
+        """Select a word based on length and subject, using per-user recent word tracking."""
         self.current_category = subject.lower()
 
         # Map tech to science and other categories to general
@@ -2178,11 +2178,9 @@ class WordSelector:
                 if (
                     len(word) == word_length
                     and word.isalpha()
-                    and word not in self._recently_used_words
+                    and word not in self.get_recently_used_words(username)
                 ):
-                    self._recently_used_words.add(word)
-                    if len(self._recently_used_words) > self._max_recent_words:
-                        self._recently_used_words.pop()
+                    self._add_recent_word(word, username)
                     return word
                 logger.warning(f"API returned invalid word: {word}")
             except Exception as e:
@@ -2190,18 +2188,14 @@ class WordSelector:
                 self.use_fallback = True
 
         # Always try dictionary if present, even in fallback mode
-        word = self._select_word_from_dictionary(word_length, subject)
+        word = self._select_word_from_dictionary(word_length, subject, username=username)
         if word:
-            self._recently_used_words.add(word)
-            if len(self._recently_used_words) > self._max_recent_words:
-                self._recently_used_words.pop()
+            self._add_recent_word(word, username)
             return word
 
         # Only use fallback pool if both API and dictionary fail
         word = get_fallback_word(word_length, subject)
-        self._recently_used_words.add(word)
-        if len(self._recently_used_words) > self._max_recent_words:
-            self._recently_used_words.pop()
+        self._add_recent_word(word, username)
         return word
 
     def _answer_question_fallback(self, word: str, question: str, subject: str = "general") -> str:

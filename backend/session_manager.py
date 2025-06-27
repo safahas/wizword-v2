@@ -186,4 +186,26 @@ class SessionManager:
             user_games,
             key=lambda x: x.get('timestamp', ''),
             reverse=True
-        ) 
+        )
+
+    def get_global_high_score_current_month(self, mode: Optional[str] = None, category: Optional[str] = None) -> Optional[Dict]:
+        """Get the highest score among all users for the current month, regardless of mode or category."""
+        if self.use_cloud:
+            try:
+                games = self.table.scan().get('Items', [])
+            except Exception as e:
+                print(f"Failed to get games from DynamoDB: {e}")
+                games = self._get_local_games()
+        else:
+            games = self._get_local_games()
+        now = datetime.now()
+        current_month = now.strftime('%Y-%m')
+        filtered = [
+            g for g in games
+            if g.get('game_over', False)
+            and g.get('timestamp', '').startswith(current_month)
+            # mode and category filters removed
+        ]
+        if not filtered:
+            return None
+        return max(filtered, key=lambda x: x.get('score', 0)) 
