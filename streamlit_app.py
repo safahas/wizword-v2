@@ -759,7 +759,7 @@ def display_welcome():
                 white-space: normal;
             }
             </style>
-        """
+        """   
     st.markdown(high_score_html, unsafe_allow_html=True)
     # --- End WizWord Banner with Global High Score ---
     if st.session_state.get('game'):
@@ -818,6 +818,42 @@ def display_welcome():
                     </script>
                 """, unsafe_allow_html=True)
                 st.rerun()
+        # End of form block
+
+        # Toggleable High Score Monthly History
+        if "show_high_score_history" not in st.session_state:
+            st.session_state.show_high_score_history = False
+
+        if st.button("🏆 High Score Monthly History", key="show_high_score_history_btn"):
+            st.session_state.show_high_score_history = not st.session_state.show_high_score_history
+
+        if st.session_state.show_high_score_history:
+            with st.expander("Global Monthly Highest Score History", expanded=True):
+                # Show previous months' high scores for ALL modes and ALL categories
+                from datetime import datetime
+                session_manager = SessionManager()
+                all_games = session_manager._get_local_games()
+                year = datetime.now().strftime('%Y')
+                monthly_scores = {}
+                for g in all_games:
+                    ts = g.get('timestamp', '')
+                    if g.get('game_over', False) and ts.startswith(year):
+                        month = ts[:7]  # YYYY-MM
+                        if month not in monthly_scores or g['score'] > monthly_scores[month]['score']:
+                            monthly_scores[month] = {
+                                'score': g['score'],
+                                'nickname': g.get('nickname', ''),
+                                'mode': g.get('mode', ''),
+                                'subject': g.get('subject', ''),
+                            }
+                for month in sorted(monthly_scores.keys(), reverse=True):
+                    entry = monthly_scores[month]
+                    st.markdown(
+                        f"**{month}**: 🌍 Global Highest Score ({entry['mode']}, {entry['subject'].title()}): "
+                        f"<span style='color:#FF6B6B;'>{entry['score']}</span> by "
+                        f"<span style='color:#222;'>{entry['nickname']}</span>",
+                        unsafe_allow_html=True
+                    )
         # Add Exit button below the form
         if st.button("🚪 Exit", key="exit_btn"):
             for key in list(st.session_state.keys()):
@@ -1014,34 +1050,22 @@ def display_game():
                     st.session_state.beat_score = game.score
                     if is_correct:
                         st.success(message)
-                        if game.mode == "Beat":
-                            st.session_state.beat_word_count += 1
-                            st.session_state["clear_guess_field"] = True
-                            # Only create a new GameLogic instance if the word was solved in Beat mode
-                            # --- RANDOMIZE word_length and subject if original choice was 'any' ---
-                            orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
-                            orig_category = st.session_state.get('original_category_choice', game.subject)
-                            new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
-                            categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
-                            new_subject = random.choice(categories) if orig_category == "any" else game.subject
-                            st.session_state.game = GameLogic(
-                                word_length=new_word_length,
-                                subject=new_subject,
-                                mode=game.mode,
-                                nickname=game.nickname,
-                                difficulty=game.difficulty,
-                                initial_score=game.score  # carry over score
-                            )
-                            # (Removed print for last 25 chosen words)
-                            st.rerun()
-                        else:
-                            # In Fun mode, trigger game over and set just_finished_game flag
-                            st.session_state.game_over = True
-                            st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
-                            # Save completed game for global high score
-                            SessionManager().save_game(st.session_state.game_summary)
-                            st.session_state.just_finished_game = True
-                            st.rerun()
+                        st.session_state.beat_word_count += 1
+                        st.session_state["clear_guess_field"] = True
+                        orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
+                        orig_category = st.session_state.get('original_category_choice', game.subject)
+                        new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+                        categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
+                        new_subject = random.choice(categories) if orig_category == "any" else game.subject
+                        st.session_state.game = GameLogic(
+                            word_length=new_word_length,
+                            subject=new_subject,
+                            mode=game.mode,
+                            nickname=game.nickname,
+                            difficulty=game.difficulty,
+                            initial_score=game.score  # carry over score
+                        )
+                        st.rerun()
                     else:
                         st.error(message)
                         st.rerun()
@@ -1275,36 +1299,23 @@ def display_game():
                 is_correct, message, points = game.make_guess(guess)
                 st.session_state.beat_score = game.score
                 if is_correct:
-                    print(f"[DEBUG] Correct guess detected. Mode: {game.mode}")
                     st.success(message)
-                    if game.mode == "Beat":
-                        st.session_state.beat_word_count += 1
-                        st.session_state["clear_guess_field"] = True
-                        # Only create a new GameLogic instance if the word was solved in Beat mode
-                        # --- RANDOMIZE word_length and subject if original choice was 'any' ---
-                        orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
-                        orig_category = st.session_state.get('original_category_choice', game.subject)
-                        new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
-                        categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
-                        new_subject = random.choice(categories) if orig_category == "any" else game.subject
-                        st.session_state.game = GameLogic(
-                            word_length=new_word_length,
-                            subject=new_subject,
-                            mode=game.mode,
-                            nickname=game.nickname,
-                            difficulty=game.difficulty,
-                            initial_score=game.score  # carry over score
-                        )
-                        # (Removed print for last 25 chosen words)
-                        st.rerun()
-                    else:
-                        # In Fun mode, trigger game over and set just_finished_game flag
-                        st.session_state.game_over = True
-                        st.session_state.game_summary = game.get_game_summary() if hasattr(game, 'get_game_summary') else {}
-                        # Save completed game for global high score
-                        SessionManager().save_game(st.session_state.game_summary)
-                        st.session_state.just_finished_game = True
-                        st.rerun()
+                    st.session_state.beat_word_count += 1
+                    st.session_state["clear_guess_field"] = True
+                    orig_length = st.session_state.get('original_word_length_choice', len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0)
+                    orig_category = st.session_state.get('original_category_choice', game.subject)
+                    new_word_length = random.randint(3, 10) if orig_length == "any" else len(game.selected_word) if hasattr(game, 'selected_word') and game.selected_word else 0
+                    categories = ["general", "animals", "food", "places", "science", "tech", "sports", "4th_grade"]
+                    new_subject = random.choice(categories) if orig_category == "any" else game.subject
+                    st.session_state.game = GameLogic(
+                        word_length=new_word_length,
+                        subject=new_subject,
+                        mode=game.mode,
+                        nickname=game.nickname,
+                        difficulty=game.difficulty,
+                        initial_score=game.score  # carry over score
+                    )
+                    st.rerun()
                 else:
                     st.error(message)
                     st.rerun()

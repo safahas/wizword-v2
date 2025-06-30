@@ -1986,20 +1986,36 @@ class WordSelector:
             templates = hints_data.get('templates', {})
             if subject not in templates:
                 subject = 'general'
-            all_words = list(templates.get(subject, {}).keys())
+            all_words = [w for w in templates.get(subject, {}).keys() if len(w) == int(word_length)]
         except Exception as e:
             logger.error(f"Error loading hints.json: {e}")
             all_words = []
-        # Exclude recently used words for this user
-        recent = set(self.get_recently_used_words(username))
+
+        # Track recent words per user+subject+length
+        recent_key = f"{username}:{subject}:{word_length}"
+        if not hasattr(self, "_recently_used_words_by_combo"):
+            self._recently_used_words_by_combo = {}
+        recent = set(self._recently_used_words_by_combo.get(recent_key, []))
+
+        # Exclude recently used words for this combo
         candidates = [w for w in all_words if w not in recent]
         if not candidates:
             candidates = all_words  # If all words used, allow repeats
+
         if not candidates:
-            logger.error(f"No candidate words available for subject '{subject}'")
+            logger.error(f"No candidate words available for subject '{subject}' and length '{word_length}'")
             return None
+
         word = random.choice(candidates)
-        self._add_recent_word(word, username)
+
+        # Update recent list
+        if recent_key not in self._recently_used_words_by_combo:
+            self._recently_used_words_by_combo[recent_key] = []
+        self._recently_used_words_by_combo[recent_key].insert(0, word)
+        # Limit the recent list size
+        max_recent = getattr(self, "_max_recent_words", 50)
+        self._recently_used_words_by_combo[recent_key] = self._recently_used_words_by_combo[recent_key][:max_recent]
+
         logger.info(f"[DEBUG] Selected fallback word: {word}")
         return word
 
