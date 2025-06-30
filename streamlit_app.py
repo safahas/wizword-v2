@@ -917,6 +917,9 @@ def display_welcome():
 
 def display_game():
     """Display the active game interface."""
+    # Always ensure Beat mode state variables are initialized
+    ensure_beat_mode_state()
+
     if "game" not in st.session_state:
         st.error("No active game found. Please start a new game.")
         return
