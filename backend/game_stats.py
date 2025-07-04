@@ -152,15 +152,22 @@ class GameStats:
         cat_scores = {cat: [] for cat in user_stats["categories"]}
         for game in user_stats["games"]:
             cat_scores[game["subject"]].append(game["score"])
-        plt.boxplot([scores for scores in cat_scores.values()], labels=cat_scores.keys())
-        plt.title("Score Distribution by Category")
-        plt.ylabel("Score")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        score_dist_path = save_path / f"score_distribution_{self.nickname}.png"
-        plt.savefig(score_dist_path)
-        plt.close()
-        graphs["score_distribution"] = str(score_dist_path)
+        # Filter out empty lists and their labels
+        filtered = [(label, scores) for label, scores in cat_scores.items() if scores]
+        if not filtered:
+            plt.close()
+            graphs["score_distribution"] = None
+        else:
+            labels, data = zip(*filtered)
+            plt.boxplot(data, labels=labels)
+            plt.title("Score Distribution by Category")
+            plt.ylabel("Score")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            score_dist_path = save_path / f"score_distribution_{self.nickname}.png"
+            plt.savefig(score_dist_path)
+            plt.close()
+            graphs["score_distribution"] = str(score_dist_path)
         # 2. Time trend
         plt.figure(figsize=(10, 6))
         dates = [datetime.fromisoformat(g["timestamp"]).date() for g in user_stats["games"]]
