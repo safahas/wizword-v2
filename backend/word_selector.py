@@ -18,6 +18,7 @@ from .openrouter_monitor import (
 )
 import re
 import base64
+import traceback
 
 # Configure logging
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
@@ -1986,7 +1987,10 @@ class WordSelector:
             templates = hints_data.get('templates', {})
             if subject not in templates:
                 subject = 'general'
-            all_words = [w for w in templates.get(subject, {}).keys() if len(w) == int(word_length)]
+            if word_length == 'any':
+                all_words = list(templates.get(subject, {}).keys())
+            else:
+                all_words = [w for w in templates.get(subject, {}).keys() if len(w) == int(word_length)]
         except Exception as e:
             logger.error(f"Error loading hints.json: {e}")
             all_words = []
@@ -2026,14 +2030,24 @@ class WordSelector:
         
         # Try to load API key from environment
         self.api_key = os.getenv("OPENROUTER_API_KEY")
+        logger.debug(f"Loaded OPENROUTER_API_KEY from environment: {self.api_key[:8]}...{'*' * (len(self.api_key)-8) if self.api_key else ''}")
         if not self.api_key:
             logger.info("Looking for .env file at: " + os.path.abspath(".env"))
             load_dotenv()
             self.api_key = os.getenv("OPENROUTER_API_KEY")
-            
+            logger.debug(f"Loaded OPENROUTER_API_KEY from .env: {self.api_key[:8]}...{'*' * (len(self.api_key)-8) if self.api_key else ''}")
         if not self.api_key:
             logger.info("No valid API key found. Using fallback mode.")
             self.use_fallback = True
+            self.api_key_valid = False
+        else:
+            # Validate format
+            valid = self._validate_api_key()
+            logger.debug(f"API key validation result: {valid}")
+            self.api_key_valid = valid
+            if not valid:
+                logger.info("API key format invalid. Using fallback mode.")
+                self.use_fallback = True
         
         # Remove all words.json loading
         # self.words_data = {}
@@ -2069,6 +2083,15 @@ class WordSelector:
         # Track recently used words per user
         self._recently_used_words_by_user = {}
         self._max_recent_words = int(os.getenv("RECENT_WORDS_LIMIT", "50"))  # Set by .env or default to 50
+
+        # Check for .env variable to bypass API word selection
+        self.bypass_api_word_selection = os.getenv("BYPASS_API_WORD_SELECTION", "false").lower() == "true"
+        logger.info(f"BYPASS_API_WORD_SELECTION is set to: {self.bypass_api_word_selection}")
+        if self.bypass_api_word_selection:
+            logger.info("Bypassing API for word selection due to BYPASS_API_WORD_SELECTION setting. Using fallback/dictionary only.")
+            self.use_fallback = True
+
+        self._api_hint_cache = {}
 
     def _validate_api_key(self) -> bool:
         """Validate the API key format."""
@@ -2185,34 +2208,114 @@ class WordSelector:
         elif self.current_category in ["movies", "music", "brands", "history"]:
             self.current_category = "general"
 
+        def is_valid_word(word: str) -> bool:
+            """Validate if a word meets all criteria."""
+            if not word or not isinstance(word, str):
+                logger.warning(f"Invalid word type or empty word: {type(word)}")
+                return False
+            if not word.isalpha():
+                logger.warning(f"Word contains non-alphabetic characters: {word}")
+                return False
+            if word_length != "any" and len(word) != word_length:
+                logger.warning(f"Word length mismatch. Expected: {word_length}, Got: {len(word)}")
+                return False
+            if word in self.get_recently_used_words(username):
+                logger.warning(f"Word was recently used: {word}")
+                return False
+            # Additional validation: check if word looks like garbage
+            if len(set(word)) < 2:  # Word must have at least 2 different letters
+                logger.warning(f"Word has too few unique letters: {word}")
+                return False
+            if not any(c in 'aeiou' for c in word):  # Word must contain at least one vowel
+                logger.warning(f"Word contains no vowels: {word}")
+                return False
+            return True
+
         # Try API first if not in fallback mode
         if not self.use_fallback:
-            try:
-                messages = self._build_prompt(word_length, subject)
-                response = self._make_api_request_with_retry(messages)
-                word = response["choices"][0]["message"]["content"].strip().lower()
-                if (
-                    len(word) == word_length
-                    and word.isalpha()
-                    and word not in self.get_recently_used_words(username)
-                ):
-                    self._add_recent_word(word, username)
-                    return word
-                logger.warning(f"API returned invalid word: {word}")
-            except Exception as e:
-                logger.error(f"Error getting word from API: {e}")
-                self.use_fallback = True
+            max_api_retries = 3
+            for attempt in range(max_api_retries):
+                try:
+                    messages = self._build_prompt(word_length, subject)
+                    # Add recent words to the user message for context
+                    recent_words = self.get_recently_used_words(username)
+                    if isinstance(messages, dict) and "messages" in messages:
+                        # Add a new user message with recent words
+                        messages["messages"].append({
+                            "role": "user",
+                            "content": f"Avoid these words: {', '.join(recent_words)}"
+                        })
+                    response = self._make_api_request_with_retry(messages)
+                    content = response["choices"][0]["message"]["content"].strip()
+                    
+                    # Handle code block formatting (triple backticks)
+                    if content.startswith('```'):
+                        content = content.lstrip('`').strip()
+                        # Remove language tag if present (e.g., 'json')
+                        if content.startswith('json'):
+                            content = content[4:].strip()
+                    
+                    # Try to extract JSON object from the content
+                    word = ""
+                    
+                    # First, try to find JSON object in the content
+                    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
+                    if json_match:
+                        json_content = json_match.group(0)
+                        try:
+                            word_obj = json.loads(json_content)
+                            word = word_obj.get("selected_word", "").lower()
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # If no JSON object found or parsing failed, try direct JSON parsing
+                    if not word:
+                        try:
+                            word_obj = json.loads(content)
+                            word = word_obj.get("selected_word", "").lower()
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # If still no word, try regex extraction
+                    if not word:
+                        match = re.search(r'"selected_word"\s*:\s*"([^"]+)"', content)
+                        if match:
+                            word = match.group(1).lower()
+                        else:
+                            # Last resort: try to extract any word-like content
+                            word_match = re.search(r'"([a-zA-Z]+)"', content)
+                            if word_match:
+                                word = word_match.group(1).lower()
+                            else:
+                                logger.warning(f"Could not extract valid word from content: {content}")
+                                continue  # Skip this attempt instead of using raw content
+                    
+                    if is_valid_word(word):
+                        self._add_recent_word(word, username)
+                        logger.info(f"Selected word '{word}' from API for user '{username}'")
+                        return word
+                    
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Error getting word from API: {e}")
+                    logger.debug(traceback.format_exc())
+                    self.use_fallback = True
+            logger.warning(f"API failed to provide a valid word after {max_api_retries} attempts.")
 
         # Always try dictionary if present, even in fallback mode
         word = self._select_word_from_dictionary(word_length, subject, username=username)
-        if word:
+        if word and is_valid_word(word):
             self._add_recent_word(word, username)
             return word
 
         # Only use fallback pool if both API and dictionary fail
         word = get_fallback_word(word_length, subject)
-        self._add_recent_word(word, username)
-        return word
+        if word and is_valid_word(word):
+            self._add_recent_word(word, username)
+            return word
+        
+        logger.error("Failed to get a valid word from any source")
+        raise ValueError("Could not select a valid word after exhausting all options")
 
     def _answer_question_fallback(self, word: str, question: str, subject: str = "general") -> str:
         """Generate a fallback answer when API is not available."""
@@ -2323,6 +2426,16 @@ class WordSelector:
         else:
             logger.info(f"[HINT DEBUG] No pre-generated hints found for word '{word}' in subject '{subject}'")
             print(f"[HINT DEBUG] No pre-generated hints found for word '{word}' in subject '{subject}'")
+            # Use cached API hints if available, otherwise call API
+            cache_key = (word, subject)
+            if cache_key in self._api_hint_cache:
+                api_hints = self._api_hint_cache[cache_key]
+            else:
+                api_hints = self.get_api_hints(word, subject, n=max_hints)
+                if api_hints:
+                    self._api_hint_cache[cache_key] = api_hints
+            if api_hints:
+                hints = api_hints
         # 3. Fallback to dynamic hints if still not found
         if hints:
             for hint in hints:
@@ -2343,23 +2456,21 @@ class WordSelector:
             messages = [
                 {
                     "role": "system",
-                    "content": QUESTION_SYSTEM_PROMPT
+                    "content": "You are a word guessing game assistant. Answer any yes/no question about the word as helpfully as possible. Do not reveal, confirm, or mention the word itself in your response. Only provide a yes/no answer and a brief explanation if relevant. Never include the word or any part of it in your answer."
                 },
                 {
                     "role": "user",
-                    "content": f"\n                    The word is: {word}\n                    Player's question: {question}\n                    \n                    Answer the question helpfully. Only answer questions about first and last letters.\n                    For other questions, answer with yes/no and a brief explanation if relevant.\n                    Remember: NEVER reveal or confirm the word.\n                    "
+                    "content": f"The word is: {word}\nPlayer's question: {question}\n"
                 }
             ]
-            
             response = self._make_api_request_with_retry(messages)
+            # Debug log for API response type and content
+            import logging
+            logger = logging.getLogger("backend.word_selector")
+            logger.debug(f"API response type: {type(response)}, content: {response}")
             answer = response["choices"][0]["message"]["content"].strip()
-            
-            if self._validate_answer(answer, word, question):
-                return answer
-            
-            logger.warning(f"API answer '{answer}' failed validation, using fallback")
-            return self._answer_question_fallback(word, question, subject)
-            
+            # Accept any API response as valid
+            return answer
         except Exception as e:
             logger.error(f"Failed to get answer from API: {str(e)}")
             return self._answer_question_fallback(word, question, subject)
@@ -2387,3 +2498,150 @@ class WordSelector:
             return random.choice(available_hints)
         # Final fallback
         return f"This is a {word_length}-letter word in the category '{subject}'."
+
+    def _build_prompt(self, word_length: int, subject: str) -> dict:
+        """Build the prompt for word selection with strict JSON formatting and no extra text."""
+        grade_level = ''
+        subj = subject.lower()
+        if subj == 'general':
+            grade_level = ' The word should be suitable for a 10th grade English student.'
+        elif subj == '4th_grade':
+            grade_level = ' The word should be suitable for a 4th grade English student.'
+        return {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        'You are a word guessing game assistant. '
+                        'Respond with ONLY a JSON object using double quotes, in this exact format: {"selected_word": "WORD"}. '
+                        'Do NOT include any explanations, code blocks, or extra text. '
+                        'The word must be a valid English word, not recently used, and match the required length.'
+                        + grade_level
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f'Choose a {word_length}-letter English word under the subject "{subject}". Respond with ONLY the JSON object using double quotes.'
+                }
+            ]
+        }
+
+    def _make_api_request_with_retry(self, messages, max_retries=3, base_delay=1.0, max_delay=10.0):
+        """
+        Make an API request with retries, exponential backoff, and jitter.
+        """
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        # Fix: handle both dict and list message formats
+        if isinstance(messages, dict) and "messages" in messages:
+            payload = {"model": self.models[0], "messages": messages["messages"]}
+        else:
+            payload = {"model": self.models[0], "messages": messages}
+        headers = self.headers
+
+        for attempt in range(max_retries):
+            try:
+                import requests
+                response = requests.post(url, json=payload, headers=headers, timeout=15)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                wait = min(max_delay, base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                logger.warning(f"API request failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait:.1f}s...")
+                time.sleep(wait)
+        raise RuntimeError("API request failed after multiple retries")
+
+    def get_api_hints(self, word: str, subject: str, n: int = 10) -> list:
+        """Use the API to generate n meaningful, diverse hints about the word, with improved prompt and post-processing."""
+        if self.use_fallback:
+            return []
+        import time
+        import logging
+        import re
+        import json
+        logger = logging.getLogger("backend.word_selector")
+        max_attempts = 3
+        blacklist = [
+            'crime', 'assail', 'attack', 'stance', 'deficit', 'direction a signal',
+            'contentious verbal exchange', 'successfully', 'assuming a stance',
+            'oppositely', 'point deduction', 'assail', 'verbal exchange', 'consequence',
+            'committed', 'successfully', 'assume', 'assail', 'attack', 'crime', 'deficit',
+            'direction', 'signal', 'stance', 'exchange', 'consequence', 'professional',
+            'particularly', 'point deduction', 'applied', 'deduction', 'hint', 'player', 'game',
+            'guess', 'word itself', 'letters', 'synonym', 'antonym', 'definition', 'spelling',
+            'anagram', 'scramble', 'reverse', 'jumbled', 'directly', 'opposite', 'not related',
+            'irrelevant', 'unrelated', 'generic', 'nonsense', 'meaningless', 'random', 'unknown',
+            'no further clues', 'no more hints', 'no additional hints', 'no hints', 'no clue',
+            'cannot provide', 'not available', 'not applicable', 'not possible', 'not enough',
+            'not sure', 'do not know', 'unsure', 'uncertain', 'unavailable', 'not given', 'not provided',
+            'not specified', 'not stated', 'not mentioned', 'not described', 'not explained', 'not defined',
+            'not listed', 'not included', 'not found', 'not present', 'not shown', 'not displayed',
+            'not revealed', 'not disclosed', 'not shared', 'not told', 'not said', 'not written', 'not shown',
+            'not shown', 'not shown', 'not shown', 'not shown', 'not shown', 'not shown', 'not shown', 'not shown',
+        ]
+        def is_meaningful_hint(hint: str, word: str) -> bool:
+            if not isinstance(hint, str) or len(hint) < 10 or len(hint) > 120:
+                return False
+            if word.lower() in hint.lower():
+                return False
+            for bad in blacklist:
+                if bad in hint.lower():
+                    return False
+            # Must be a complete English sentence (simple check)
+            if not hint[0].isupper() or not hint.strip().endswith('.'):
+                return False
+            # Should not be a question
+            if '?' in hint:
+                return False
+            # Should not be a direct definition or meta-statement
+            if 'this word' in hint.lower() or 'the word' in hint.lower():
+                return False
+            return True
+        for attempt in range(max_attempts):
+            try:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are a word guessing game assistant. Generate exactly {n} short, clear, meaningful, and diverse English hints for the secret word in the category '{subject}'. "
+                            f"Each hint must be a single, self-contained, non-question sentence that helps a player guess the word, but you must NEVER mention, reveal, or confirm the word or any part of it (including its letters, synonyms, antonyms, or definition). "
+                            f"Avoid generic, unrelated, or meta statements. Do not include explanations, code blocks, or any extra text. Respond with ONLY a JSON array of {n} unique, high-quality English sentences, nothing else."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": f"The word is: {word}\nGenerate exactly {n} hints as described."
+                    }
+                ]
+                response = self._make_api_request_with_retry(messages)
+                content = response["choices"][0]["message"]["content"].strip()
+                # Remove code block formatting if present
+                if content.startswith('```'):
+                    content = content.lstrip('`').strip()
+                    if content.startswith('json'):
+                        content = content[4:].strip()
+                try:
+                    hints = json.loads(content)
+                except Exception:
+                    # Try to extract JSON array using regex
+                    match = re.search(r'(\[.*\])', content, re.DOTALL)
+                    if match:
+                        try:
+                            hints = json.loads(match.group(1))
+                        except Exception:
+                            hints = []
+                    else:
+                        hints = []
+                # Post-process: filter for meaningful, relevant hints
+                filtered_hints = [h for h in hints if is_meaningful_hint(h, word)]
+                # Remove duplicates
+                filtered_hints = list(dict.fromkeys(filtered_hints))
+                if len(filtered_hints) >= min(5, n):
+                    logger.info(f"API returned {len(filtered_hints)} valid hints for '{word}': {filtered_hints}")
+                    return filtered_hints[:n]
+                logger.warning(f"API returned insufficient valid hints, retrying (attempt {attempt+1}/{max_attempts}): {filtered_hints}")
+                time.sleep(1.5 * (attempt + 1))
+            except Exception as e:
+                logger.error(f"Failed to get hints from API (attempt {attempt+1}): {str(e)}")
+                time.sleep(1.5 * (attempt + 1))
+        logger.error(f"API failed to provide valid hints after {max_attempts} attempts for word '{word}'")
+        return []

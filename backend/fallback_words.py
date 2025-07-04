@@ -153,7 +153,7 @@ CATEGORY_ALIASES = {
 
 def get_fallback_word(word_length: int, subject: str) -> Optional[str]:
     """
-    Get a random word from hints.json for the given subject/category, ignoring word length.
+    Get a random word from hints.json for the given subject/category. If word_length == 'any', ignore word length.
     Falls back to 'general' if the subject is not found.
     """
     logger = logging.getLogger(__name__)
@@ -168,7 +168,10 @@ def get_fallback_word(word_length: int, subject: str) -> Optional[str]:
         if subject not in templates:
             logger.warning(f"Subject '{subject}' not found in hints.json, falling back to 'general'")
             subject = 'general'
-        words = list(templates.get(subject, {}).keys())
+        if word_length == 'any':
+            words = list(templates.get(subject, {}).keys())
+        else:
+            words = [w for w in templates.get(subject, {}).keys() if len(w) == int(word_length)]
         if not words:
             logger.error(f"No words found for subject '{subject}' in hints.json")
             return None

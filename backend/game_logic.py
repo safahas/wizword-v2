@@ -67,35 +67,19 @@ class GameLogic:
             except Exception as e:
                 logger.warning(f"Error reading hints.json: {e}")
             if not all_hints:
-                all_hints = self.word_selector.generate_all_hints(self.selected_word, subject)
+                # Use API-generated hints if available, otherwise fallback
+                api_hints = self.word_selector.get_api_hints(self.selected_word, subject, n=self.current_settings["max_hints"])
+                if api_hints:
+                    all_hints = api_hints
+                    logger.info(f"[HINT REQUEST] Using {len(all_hints)} API-generated hints for '{self.selected_word}'")
+                else:
+                    all_hints = [f"This {subject} term has specific characteristics"] * self.current_settings["max_hints"]
+                    logger.warning(f"[HINT REQUEST] Using fallback hints for '{self.selected_word}'")
             logger.info(f"Generated {len(all_hints)} total hints for word '{self.selected_word}'")
             # Deduplicate all_hints
             all_hints = list(dict.fromkeys(all_hints))
-            static_hints = []
-            dynamic_hints = []
-            for hint in all_hints:
-                if hint.startswith("This") and subject.lower() in hint.lower() and "term" in hint:
-                    dynamic_hints.append(hint)
-                else:
-                    static_hints.append(hint)
-            logger.info(f"Found {len(static_hints)} static hints and {len(dynamic_hints)} dynamic hints")
-            max_hints = self.current_settings["max_hints"]
-            if len(static_hints) >= max_hints:
-                self.available_hints = static_hints[:max_hints]
-                logger.info(f"Using {len(self.available_hints)} static hints")
-            else:
-                self.available_hints = static_hints
-                remaining_slots = max_hints - len(static_hints)
-                if remaining_slots > 0:
-                    for i in range(remaining_slots):
-                        new_hint = self.word_selector.get_semantic_hint(
-                            self.selected_word,
-                            subject,
-                            previous_hints=self.available_hints
-                        )
-                        if new_hint and new_hint not in self.available_hints:
-                            self.available_hints.append(new_hint)
-                logger.info(f"Using {len(static_hints)} static hints and {len(self.available_hints) - len(static_hints)} dynamic hints")
+            self.available_hints = all_hints[:self.current_settings["max_hints"]]
+            logger.info(f"Using {len(self.available_hints)} hints for '{self.selected_word}'")
         except Exception as e:
             logger.error(f"Error initializing game: {e}")
             self.selected_word = get_fallback_word(None, subject)
