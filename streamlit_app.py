@@ -1084,12 +1084,13 @@ def display_game():
                 display_hint_section(game)
             # Move Show Word button below question field
             is_fallback = game.word_selector.use_fallback
+            api_key_valid = getattr(game.word_selector, 'api_key_valid', False)
             if is_fallback:
                 question_placeholder = "Example: Is the first letter 'A'? (Press Enter to ask)"
                 help_text = "In fallback mode, you can only ask about first or last letter"
             else:
                 question_placeholder = "Example: Is it used in everyday life? (Press Enter to ask)"
-                help_text = "Ask about the word's meaning or properties"
+                help_text = "Ask any yes/no question about the word."
             with st.container():
                 question = st.text_input(
                     "Ask a yes/no question about the word:",
@@ -1098,6 +1099,18 @@ def display_game():
                     key=f"beat_question_input_{game.guesses_made}"
                 )
                 if question:
+                    # Restrict question types only in fallback mode
+                    if is_fallback:
+                        import re
+                        q = question.strip().lower()
+                        valid = (
+                            re.search(r"first letter|last letter", q)
+                            or re.match(r"is the first letter ['\"]?\w['\"]?", q)
+                            or re.match(r"is the last letter ['\"]?\w['\"]?", q)
+                        )
+                        if not valid:
+                            st.warning("In fallback mode, you can only ask about the first or last letter.")
+                            return
                     rate_limit_ok, message = check_rate_limit()
                     if not rate_limit_ok:
                         st.warning(message)
@@ -1343,12 +1356,13 @@ def display_game():
             display_hint_section(game)
         # Question input - directly in the interface
         is_fallback = game.word_selector.use_fallback
+        api_key_valid = getattr(game.word_selector, 'api_key_valid', False)
         if is_fallback:
             question_placeholder = "Example: Is the first letter 'A'? (Press Enter to ask)"
             help_text = "In fallback mode, you can only ask about first or last letter"
         else:
             question_placeholder = "Example: Is it used in everyday life? (Press Enter to ask)"
-            help_text = "Ask about the word's meaning or properties"
+            help_text = "Ask any yes/no question about the word."
         with st.container():
             question = st.text_input(
                 "Ask a yes/no question about the word:",
@@ -1357,6 +1371,18 @@ def display_game():
                 key=f"beat_question_input_{game.guesses_made}"
             )
             if question:
+                # Restrict question types only in fallback mode
+                if is_fallback:
+                    import re
+                    q = question.strip().lower()
+                    valid = (
+                        re.search(r"first letter|last letter", q)
+                        or re.match(r"is the first letter ['\"]?\w['\"]?", q)
+                        or re.match(r"is the last letter ['\"]?\w['\"]?", q)
+                    )
+                    if not valid:
+                        st.warning("In fallback mode, you can only ask about the first or last letter.")
+                        return
                 rate_limit_ok, message = check_rate_limit()
                 if not rate_limit_ok:
                     st.warning(message)
